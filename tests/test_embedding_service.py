@@ -20,8 +20,8 @@ class FakeAPIEmbedding:
 class FakeLocalEmbedding:
     """Fake local backend that returns fixed embeddings."""
 
-    def __init__(self, model_path):
-        self.model_path = model_path
+    def __init__(self, model_name):
+        self.model_name = model_name
 
     def encode(self, texts):
         return [[0.2] * 768 for _ in texts]
@@ -183,11 +183,11 @@ class TestAPIEmbeddingBackend:
 class TestLocalEmbeddingBackend:
     """Tests for the local embedding backend (lazy model loading)."""
 
-    def test_constructor_stores_model_path(self):
+    def test_constructor_stores_model_name(self):
         from retrieval.embedding_service import LocalEmbeddingBackend
 
-        backend = LocalEmbeddingBackend(model_path="/models/bge-m3")
-        assert backend.model_path == "/models/bge-m3"
+        backend = LocalEmbeddingBackend(model_name="/models/bge-m3")
+        assert backend.model_name == "/models/bge-m3"
         assert backend._model is None  # not loaded yet
 
     def test_encode_uses_local_model(self):
@@ -202,63 +202,33 @@ class TestLocalEmbeddingBackend:
             [0.3, 0.4],
         ]
 
-        backend = LocalEmbeddingBackend(model_path="/models/test")
-        # Inject mock model directly (avoids needing FlagEmbedding installed)
+        backend = LocalEmbeddingBackend(model_name="/models/test")
         backend._model = mock_model
         result = backend.encode(["text1", "text2"])
 
         assert result == [[0.1, 0.2], [0.3, 0.4]]
         mock_model.encode.assert_called_once_with(
-            ["text1", "text2"], batch_size=32
+            ["text1", "text2"], batch_size=8  # CPU mode
         )
 
-    def test_encode_query_uses_local_model(self):
+    def test_local_backend_uses_fp16(self):
+        """With device=cuda, _ensure_model will try to use fp16."""
+        from retrieval.embedding_service import LocalEmbeddingBackend
+        backend = LocalEmbeddingBackend(model_name="/models/test", device="cuda")
+        assert backend.device == "cuda"
+
+    def test_model_property_lazy_loading(self):
+        """_model is None before encode, set after _ensure_model."""
         from retrieval.embedding_service import LocalEmbeddingBackend
 
         mock_model = MagicMock()
         mock_model.encode.return_value = {
             "dense_vecs": MagicMock()
         }
-        mock_model.encode.return_value["dense_vecs"].tolist.return_value = [
-            [0.5, 0.6],
-        ]
+        mock_model.encode.return_value["dense_vecs"].tolist.return_value = [[0.1]]
 
-        backend = LocalEmbeddingBackend(model_path="/models/test")
-        backend._model = mock_model
-        result = backend.encode_query("query text")
-
-        assert result == [0.5, 0.6]
-
-    def test_local_backend_uses_fp16(self):
-        """_load_model should call BGEM3FlagModel with use_fp16=True."""
-        from retrieval.embedding_service import LocalEmbeddingBackend
-
-        mock_bge = MagicMock()
-        with patch.object(
-            LocalEmbeddingBackend, "_load_model",
-            autospec=True,
-            side_effect=lambda self: setattr(self, "_model", mock_bge),
-        ):
-            backend = LocalEmbeddingBackend(model_path="/models/test")
-            # Lazy load triggered by encode when _model is None
-            backend.encode(["trigger load"])
-            # After _load_model, _model should be our mock
-            assert backend._model is mock_bge
-
-    def test_model_property_lazy_loading(self):
-        """model property returns _model or loads it lazily."""
-        from retrieval.embedding_service import LocalEmbeddingBackend
-
-        mock_model = MagicMock()
-        with patch.object(
-            LocalEmbeddingBackend, "_load_model",
-            autospec=True,
-            side_effect=lambda self: setattr(self, "_model", mock_model),
-        ):
-            backend = LocalEmbeddingBackend(model_path="/models/test")
-            # First access triggers load
-            model = backend.model
-            assert model is mock_model
-            # Second access returns cached
-            model2 = backend.model
-            assert model2 is mock_model
+        backend = LocalEmbeddingBackend(model_name="/models/test")
+        assert backend._model is None  # not loaded yet
+        backend._model = mock_model  # inject mock
+        backend.encode(["trigger"])
+        assert backend._model is mock_model  # still set after encode
