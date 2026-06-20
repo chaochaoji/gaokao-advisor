@@ -1,0 +1,33 @@
+# Environment secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+.pytest_cache/
+
+# Data directories
+data/raw/*
+data/processed/*
+data/chroma_db/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/chroma_db/.gitkeep
+
+# Models (large files)
+models/*
+!models/.gitkeep
+
+# Logs
+logs/*
+!logs/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
