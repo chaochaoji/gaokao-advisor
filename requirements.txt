@@ -1,0 +1,25 @@
+# Core
+gradio>=4.0,<5.0
+chromadb>=0.4,<0.6
+langchain>=0.2,<0.4
+langchain-community>=0.2
+
+# LLM
+anthropic>=0.30
+openai>=1.0  # DeepSeek compatible OpenAI SDK
+
+# Embedding & Reranker
+FlagEmbedding>=1.2  # BGE model invocation
+
+# Data Processing
+jieba>=0.42
+trafilatura>=1.12
+unstructured>=0.15
+openai-whisper>=20231117
+
+# Storage
+# sqlite3 is stdlib
+
+# Testing
+pytest>=8.0
+pytest-asyncio>=0.23
