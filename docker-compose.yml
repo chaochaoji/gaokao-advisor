@@ -1,0 +1,18 @@
+version: "3.8"
+services:
+  zhangxuefeng:
+    build: .
+    ports:
+      - "${GRADIO_PORT:-7860}:7860"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./logs:/app/logs
+    environment:
+      - ZXF_LLM_PRIMARY_API_KEY=${ZXF_LLM_PRIMARY_API_KEY}
+      - ZXF_LLM_PRIMARY_MODEL=${ZXF_LLM_PRIMARY_MODEL:-claude-sonnet-4-6}
+      - ZXF_LLM_FALLBACK_API_KEY=${ZXF_LLM_FALLBACK_API_KEY}
+      - ZXF_LLM_FALLBACK_MODEL=${ZXF_LLM_FALLBACK_MODEL:-deepseek-chat}
+      - ZXF_EMBEDDING_API_KEY=${ZXF_EMBEDDING_API_KEY}
+      - ZXF_EMBEDDING_MODE=${ZXF_EMBEDDING_MODE:-api}
+    restart: unless-stopped
