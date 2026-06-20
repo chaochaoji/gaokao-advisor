@@ -80,7 +80,10 @@ def fts5_search(
     # same way so tokens align.
     # cut_for_search is used to produce finer-grained tokens that improve
     # recall for compound words.
-    tokenized = " ".join(jieba.cut_for_search(query))
+    # Tokens are joined with OR to maximise recall -- any matching token
+    # in a row is enough.  FTS5 sorts by bm25 rank so the best matches
+    # still rise to the top.
+    tokenized = " OR ".join(jieba.cut_for_search(query))
     try:
         cursor = conn.execute(
             "SELECT content, source, content_type, date, topic, stance, "

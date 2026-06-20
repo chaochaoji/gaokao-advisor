@@ -15,6 +15,7 @@ data/chroma_db/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/chroma_db/.gitkeep
+data/*.db
 
 # Models (large files)
 models/*
@@ -31,3 +32,6 @@ logs/*
 # OS
 .DS_Store
 Thumbs.db
+
+# Test outputs
+tests/eval_report.json
