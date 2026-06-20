@@ -4,8 +4,13 @@ Provides the same interface as chromadb (Collection.add, .query, .get,
 .delete) but implemented in pure Python with numpy for cosine-similarity
 search.  Works when chromadb native extensions are unavailable.
 
+Persistence is handled via pickle: after every mutating operation (add,
+delete) the collection is serialised to
+``{config.chroma_persist_dir}/collection.pkl``.  On
+:func:`get_chroma_collection` the pickle is loaded if it exists.
+
 Public API:
-    get_chroma_collection(config) -> NumpyCollection
+    get_chroma_collection(config, embedding_svc=None) -> NumpyCollection
     add_chunks(collection, chunks: list[dict])
     query_chunks(collection, query: str, top_k: int = 10) -> list[dict]
     delete_by_source(collection, source_prefix: str)
@@ -14,6 +19,8 @@ Public API:
 from __future__ import annotations
 
 import hashlib
+import os
+import pickle
 from typing import Optional
 
 import numpy as np
@@ -67,13 +74,61 @@ class NumpyCollection:
         Dimensionality of the embedding vectors (default 384).
     """
 
-    def __init__(self, name: str, embedding_dim: int = 384) -> None:
+    def __init__(
+        self,
+        name: str,
+        embedding_dim: int = 384,
+        persist_dir: Optional[str] = None,
+        embedding_svc=None,
+    ) -> None:
         self.name = name
         self._dim = embedding_dim
+        self._persist_dir = persist_dir
+        self._embedding_svc = embedding_svc
         self._ids: list[str] = []
         self._documents: list[str] = []
         self._metadatas: list[dict] = []
         self._embeddings: list[np.ndarray] = []
+
+    # -- persistence helpers --------------------------------------------
+
+    def _pickle_path(self) -> Optional[str]:
+        if not self._persist_dir:
+            return None
+        return os.path.join(self._persist_dir, "collection.pkl")
+
+    def _save(self) -> None:
+        path = self._pickle_path()
+        if not path:
+            return
+        os.makedirs(self._persist_dir, exist_ok=True)
+        with open(path, "wb") as f:
+            pickle.dump(
+                {
+                    "name": self.name,
+                    "dim": self._dim,
+                    "ids": self._ids,
+                    "documents": self._documents,
+                    "metadatas": self._metadatas,
+                    "embeddings": self._embeddings,
+                },
+                f,
+            )
+
+    @staticmethod
+    def _load(path: str, embedding_svc=None) -> "NumpyCollection":
+        with open(path, "rb") as f:
+            data = pickle.load(f)
+        col = NumpyCollection(
+            name=data["name"],
+            embedding_dim=data["dim"],
+            embedding_svc=embedding_svc,
+        )
+        col._ids = data["ids"]
+        col._documents = data["documents"]
+        col._metadatas = data["metadatas"]
+        col._embeddings = data["embeddings"]
+        return col
 
     # -- chromadb-compatible API -----------------------------------------
 
@@ -91,6 +146,11 @@ class NumpyCollection:
         documents = documents or [""] * n
         metadatas = metadatas or [{}] * n
 
+        # Use embedding_svc for batch embedding when available and no
+        # explicit embeddings were passed in.
+        if embeddings is None and self._embedding_svc is not None:
+            embeddings = self._embedding_svc.embed(documents)
+
         for i in range(n):
             self._ids.append(ids[i])
             self._documents.append(documents[i])
@@ -101,6 +161,8 @@ class NumpyCollection:
                 )
             else:
                 self._embeddings.append(_embed_text(documents[i], self._dim))
+
+        self._save()
 
     def query(
         self,
@@ -134,7 +196,12 @@ class NumpyCollection:
         results_dist: list[list[float]] = []
 
         for query in query_texts:
-            q_vec = _embed_text(query, self._dim)
+            # Use embedding_svc when available, else fall back to hash
+            if self._embedding_svc is not None:
+                q_raw = self._embedding_svc.embed_query(query)
+                q_vec = np.array(q_raw, dtype=np.float64)
+            else:
+                q_vec = _embed_text(query, self._dim)
             # cosine similarity = dot product (vectors are L2-normalised)
             scores = emb_matrix @ q_vec  # (N,)
             # get top-k indices
@@ -208,18 +275,45 @@ class NumpyCollection:
         self._documents = [self._documents[i] for i in keep]
         self._metadatas = [self._metadatas[i] for i in keep]
         self._embeddings = [self._embeddings[i] for i in keep]
+        self._save()
 
 
 # ── Public API ─────────────────────────────────────────────────────────
 
 
-def get_chroma_collection(config) -> NumpyCollection:
+def get_chroma_collection(config, embedding_svc=None) -> NumpyCollection:
     """Return a NumpyCollection instance for the given config.
 
-    Signature mirrors what a real chromadb-backed function would look like
-    so callers don't need to change when the backend is swapped.
+    When ``embedding_svc`` is provided it is used for both adding
+    (batch ``embed``) and querying (``embed_query``).  When absent the
+    built-in character-bigram hashing fallback is used.
+
+    If a persisted pickle exists at ``{config.chroma_persist_dir}/
+    collection.pkl`` it is loaded automatically.  After every mutating
+    operation the collection is saved back to the same path so data
+    survives restarts.
     """
-    return NumpyCollection(name="zhangxuefeng_corpus")
+    persist_dir = config.chroma_persist_dir
+    # ":memory:" and empty string mean no persistence
+    if persist_dir == ":memory:" or not persist_dir:
+        persist_dir = None
+
+    pickle_path = (
+        os.path.join(persist_dir, "collection.pkl")
+        if persist_dir
+        else None
+    )
+
+    if pickle_path and os.path.isfile(pickle_path):
+        col = NumpyCollection._load(pickle_path, embedding_svc=embedding_svc)
+        col._persist_dir = persist_dir
+        return col
+
+    return NumpyCollection(
+        name="zhangxuefeng_corpus",
+        persist_dir=persist_dir,
+        embedding_svc=embedding_svc,
+    )
 
 
 def add_chunks(collection: NumpyCollection, chunks: list[dict]) -> None:
