@@ -1,0 +1,454 @@
+# -*- coding: utf-8 -*-
+"""Gradio Web UI for the Zhang Xuefeng Knowledge Distillation Agent."""
+from __future__ import annotations
+
+import os
+import sys
+import json
+import time
+import re
+from typing import Generator, Optional
+
+import gradio as gr
+
+_PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
+_SRC_ROOT = os.path.join(_PROJECT_ROOT, 'src')
+if _PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, _PROJECT_ROOT)
+if _SRC_ROOT not in sys.path:
+    sys.path.insert(0, _SRC_ROOT)
+
+from src.config import load_config
+from src.knowledge.sqlite_store import get_db, init_db
+from src.knowledge.chroma_store import get_chroma_collection
+from src.retrieval.embedding_service import EmbeddingService
+from src.retrieval.reranker import RerankerService
+from src.retrieval.hybrid_search import HybridSearch
+from src.agent.router import classify_intent
+from src.agent.volunteer import handle as volunteer_handle
+from src.agent.opinion import handle as opinion_handle
+from src.agent.style_chat import handle as style_chat_handle
+from src.agent.fallback import handle as fallback_handle
+from src.safety.input_gateway import InputSafetyGateway
+from src.utils.logger import AgentLogger
+from src.utils.conversation import ConversationManager
+
+
+# ============================================================================
+# Configuration and Service Initialization
+# ============================================================================
+
+config = load_config()
+logger = AgentLogger(config.log_dir, session_id='gradio')
+
+db = get_db(config)
+init_db(db)
+logger.log_info('sqlite', 'db_initialized', {'path': config.sqlite_path})
+
+chroma_col = get_chroma_collection(config)
+chroma_count = len(chroma_col._ids) if hasattr(chroma_col, '_ids') else 'unknown'
+logger.log_info('chromadb', 'collection_loaded', {'count': chroma_count})
+
+embedding_svc = EmbeddingService(
+    mode=config.embedding_mode,
+    api_key=config.embedding_api_key,
+    model=config.embedding_model,
+    local_path=config.embedding_local_path,
+)
+logger.log_info('embedding', 'service_initialized', {'mode': config.embedding_mode})
+
+reranker = RerankerService(
+    mode=config.reranker_mode,
+    model=config.reranker_model,
+)
+logger.log_info('reranker', 'service_initialized', {'mode': config.reranker_mode})
+
+hybrid_search = HybridSearch(
+    mode='prod',
+    embedding_svc=embedding_svc,
+    chroma_col=chroma_col,
+    db_conn=db,
+    reranker=reranker,
+    logger=logger,
+)
+logger.log_info('hybrid_search', 'service_initialized')
+
+safety = InputSafetyGateway()
+conversation = ConversationManager()
+logger.log_info('safety', 'gateway_initialized')
+logger.log_info('conversation', 'manager_initialized')
+
+# ============================================================================
+# LLM Client
+# ============================================================================
+
+def _build_llm_client():
+    primary = None
+    fallback = None
+
+    if config.llm_primary_api_key:
+        try:
+            import anthropic
+            primary = anthropic.Anthropic(
+                api_key=config.llm_primary_api_key,
+                base_url=config.llm_primary_base_url or None,
+                timeout=config.llm_timeout,
+            )
+            logger.log_info(
+                'llm', 'primary_client_ready',
+                {'model': config.llm_primary_model},
+            )
+        except Exception as e:
+            logger.log_error(
+                'llm', 'primary_client_init_failed', e,
+                fallback_action='use_fallback_only',
+            )
+    else:
+        logger.log_info('llm', 'primary_skipped', {'reason': 'no_api_key'})
+
+    if config.llm_fallback_api_key:
+        try:
+            from openai import OpenAI
+            fallback = OpenAI(
+                api_key=config.llm_fallback_api_key,
+                base_url=config.llm_fallback_base_url,
+                timeout=config.llm_timeout,
+            )
+            logger.log_info('llm', 'fallback_client_ready',
+                {'model': config.llm_fallback_model},
+            )
+        except Exception as e:
+            logger.log_error(
+                'llm', 'fallback_client_init_failed', e,
+                fallback_action='no_llm_available',
+            )
+    else:
+        logger.log_info('llm', 'fallback_skipped', {'reason': 'no_api_key'})
+
+    return primary, fallback
+
+
+(llm_primary, llm_fallback) = _build_llm_client()
+
+
+# ============================================================================
+# Unified LLM Call Interface
+# ============================================================================
+
+REJECT_MESSAGES = {
+    "jailbreak": "[安全提醒] 你的消息包含不被允许的指令，请重新描述你的问题。",
+    "privacy": "[安全提醒] 请勿查询他人隐私信息。",
+    "abuse": "[安全提醒] 请使用文明用语交流。",
+    "regional_attack": "[安全提醒] 地域攻击言论不被允许。",
+}
+
+
+def call_llm_sync(prompt_or_system, user_msg=None):
+    """Non-streaming LLM call. Returns full response string."""
+    if user_msg is not None:
+        system_prompt = prompt_or_system
+        user_content = user_msg
+    else:
+        system_prompt = None
+        user_content = prompt_or_system
+
+    client = llm_primary or llm_fallback
+    if client is None:
+        return "[系统提示] LLM 客户端未配置，请在 .env 中设置 API key。"
+
+    using_primary = bool(llm_primary)
+    model = config.llm_primary_model if using_primary else config.llm_fallback_model
+
+    try:
+        return _call_anthropic_sync(client, model, system_prompt, user_content)
+    except Exception as e:
+        logger.log_error(
+            "llm" if using_primary else "llm_fallback",
+            "sync_call_failed", e,
+            fallback_action="retry_with_fallback",
+        )
+        if using_primary and llm_fallback:
+            try:
+                return _call_openai_sync(llm_fallback, config.llm_fallback_model, system_prompt, user_content)
+            except Exception as e2:
+                logger.log_error("llm_fallback", "fallback_sync_failed", e2)
+        return "[系统提示] LLM 调用失败，请稍后重试。"
+
+
+def _call_anthropic_sync(client, model, system_prompt, user_content):
+    """Synchronous call to Anthropic API."""
+    kwargs = {}
+    messages = []
+    if system_prompt:
+        kwargs["system"] = system_prompt
+    messages.append({"role": "user", "content": user_content})
+    resp = client.messages.create(
+        model=model,
+        max_tokens=2048,
+        messages=messages,
+        **kwargs,
+    )
+    return resp.content[0].text
+
+
+def _call_openai_sync(client, model, system_prompt, user_content):
+    """Synchronous call to OpenAI-compatible API (DeepSeek)."""
+    messages = []
+    if system_prompt:
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": user_content})
+    resp = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        max_tokens=2048,
+        temperature=0.7,
+    )
+    return resp.choices[0].message.content
+
+# ============================================================================
+# Main Chat Function (Gradio streaming generator)
+# ============================================================================
+
+
+def chat_fn(message, history):
+    # Main chat orchestrator: safety -> reference resolution -> intent
+    # -> search -> scene handler -> streaming response.
+    # --- Safety check ---
+    check_result = safety.check(message)
+    if not check_result['safe']:
+        reject_msg = REJECT_MESSAGES.get(check_result['category'],
+            '[安全提醒] 你的消息包含不适当内容。')
+        logger.log_warning('safety', 'message_blocked',
+            {'category': check_result['category'], 'reason': check_result['reason']})
+        yield reject_msg
+        return
+
+    # --- Reference resolution ---
+    resolved_message = conversation.resolve_references(message)
+
+    # --- Intent routing ---
+    def _router_llm(system_prompt, user_msg):
+        return call_llm_sync(system_prompt, user_msg)
+    intent = classify_intent(_router_llm, resolved_message)
+    scene = intent.get('scene', 'general')
+    confidence = intent.get('confidence', 0.3)
+    logger.log_info('router', 'intent_classified',
+        {'scene': scene, 'confidence': confidence, 'query': resolved_message[:80]})
+
+    # --- Hybrid search ---
+    ctx = conversation.get_context()
+    search_results = hybrid_search.search(resolved_message, scene, ctx.get('context_state', {}))
+    logger.log_info('hybrid_search', 'search_complete', {'count': len(search_results)})
+
+    # --- Scene handler ---
+    handlers = {
+        'volunteer': volunteer_handle,
+        'opinion': opinion_handle,
+        'style_chat': style_chat_handle,
+        'general': fallback_handle,
+    }
+    handler = handlers.get(scene, fallback_handle)
+
+    # Build the llm_call closure for handlers
+    def _handler_llm(prompt_or_system, user_msg=None):
+        return call_llm_sync(prompt_or_system, user_msg)
+
+    response_text = handler(resolved_message, ctx.get('context_state', {}),
+        search_results, _handler_llm)
+
+    # Stream the response character by character for Gradio
+    # (Full string returned by handler, streamed as chunks)
+    chunk_size = 30
+    for i in range(0, len(response_text), chunk_size):
+        yield response_text[i:i + chunk_size]
+
+    # --- Save conversation turn ---
+    conversation.add_turn(message, response_text)
+
+
+# ============================================================================
+# Volunteer Assessment Form Handler
+# ============================================================================
+
+
+def volunteer_form_fn(province, score, category, interests):
+    # Take structured form input and run the volunteer assessment pipeline.
+    if not province or not score:
+        yield "请至少填写省份和分数。"
+        return
+
+    query = f"{province}{category}{score}分 志愿填报推荐"
+    if interests:
+        query += f" 对{interests}感兴趣"
+
+    # Build context from form fields
+    context = {
+        "province": province,
+        "score": score,
+        "category": category or "物理类",
+        "interests": [i.strip() for i in interests.split(",") if i.strip()],
+    }
+
+    # Search
+    search_results = hybrid_search.search(query, "volunteer", context)
+
+    # Build prompt and call LLM
+    from src.utils.prompt_templates import build_prompt
+    prompt = build_prompt("volunteer", context)
+    context_str = "\n".join(
+        [f"[检索结果 {i+1}] {r['content']}" for i, r in enumerate(search_results[:8])]
+    )
+    full_prompt = f"{prompt}\n\n## 检索到的相关信息\n{context_str}\n\n## 用户问题\n{query}"
+
+    response_text = call_llm_sync(full_prompt)
+
+    # Stream response
+    chunk_size = 30
+    for i in range(0, len(response_text), chunk_size):
+        yield response_text[i:i + chunk_size]
+
+
+# ============================================================================
+# Quote Search Handler
+# ============================================================================
+
+
+def quote_search_fn(query, top_k):
+    # Full-text search over the corpus for quotes.
+    if not query or not query.strip():
+        return "请输入搜索关键词。"
+
+    try:
+        from src.retrieval.keyword_search import keyword_search
+        results = keyword_search(db, query, top_k=int(top_k))
+    except Exception as e:
+        return f"搜索失败: {e}"
+
+    if not results:
+        return "未找到相关语录，请尝试其他关键词。"
+
+    # Format as readable text
+    lines_out = []
+    for i, r in enumerate(results):
+        source = r.get("source", "未知")
+        date = r.get("date", "未知日期")
+        content = r.get("content", "")[:500]
+        topic = r.get("topic", "")
+        lines_out.append(f"### 结果 {i+1} | {source} | {date}")
+        if topic:
+            lines_out.append(f"*主题: {topic}*")
+        lines_out.append(content)
+        lines_out.append("")
+    return "\n".join(lines_out)
+
+
+# ============================================================================
+# Health Status Check
+# ============================================================================
+
+
+def get_health_status():
+    # Probe each service and return a status dict.
+    status = {}
+
+    # SQLite
+    try:
+        db.execute("SELECT 1")
+        status['SQLite'] = 'ok'
+    except Exception as e:
+        status['SQLite'] = f'error: {e}'
+
+    # ChromaDB / NumpyCollection
+    try:
+        count = len(chroma_col._ids) if hasattr(chroma_col, '_ids') else '?'
+        status['ChromaDB'] = f'ok ({count} chunks)'
+    except Exception as e:
+        status['ChromaDB'] = f'error: {e}'
+
+    # Embedding
+    status['Embedding'] = f'ok (mode={config.embedding_mode})'
+
+    # Reranker
+    status['Reranker'] = f'ok (mode={config.reranker_mode})'
+
+    # LLM Primary
+    if llm_primary:
+        status['LLM Primary'] = f'ok ({config.llm_primary_model})'
+    else:
+        status['LLM Primary'] = 'not configured'
+
+    # LLM Fallback
+    if llm_fallback:
+        status['LLM Fallback'] = f'ok ({config.llm_fallback_model})'
+    else:
+        status['LLM Fallback'] = 'not configured'
+
+    return status
+
+
+def get_health_markdown():
+    # Render health status as markdown table.
+    status = get_health_status()
+    lines_md = ["| Service | Status |", "|---------|--------|"]
+    for svc, st in status.items():
+        emoji = '✅' if st.startswith('ok') else '⚠️'
+        lines_md.append(f'| {svc} | {emoji} {st} |')
+    return "\n".join(lines_md)
+
+
+
+# ============================================================================
+# Gradio UI
+# ============================================================================
+def create_ui():
+    import gradio as gr
+    custom_css = (
+        '.health-ok { color: #22c55e; } '
+        '.health-warn { color: #eab308; }'
+    )
+    with gr.Blocks(title='zhangxuefeng Knowledge Agent') as demo:
+        gr.Markdown('# zhangxuefeng Knowledge Agent')
+        gr.Markdown('Powered by Zhang Xuefeng knowledge distillation -- AI for education planning.')
+        with gr.Accordion('System Health', open=False):
+            health_md = gr.Markdown(value=get_health_markdown(), every=30)
+        with gr.Tabs():
+            with gr.TabItem('Smart Q&A'):
+                qa_chatbot = gr.Chatbot(height=550, label='Conversation')
+                qa_input = gr.Textbox(placeholder='Ask your question about education, career, etc...', label='Your message', scale=4)
+                with gr.Row():
+                    qa_submit = gr.Button('Send', variant='primary')
+                    qa_clear = gr.Button('Clear')
+                qa_submit.click(fn=chat_fn, inputs=[qa_input, qa_chatbot], outputs=[qa_chatbot])
+                qa_input.submit(fn=chat_fn, inputs=[qa_input, qa_chatbot], outputs=[qa_chatbot])
+                qa_clear.click(lambda: ([], ''), None, [qa_chatbot, qa_input])
+            # Tab 2: Volunteer Assessment
+            with gr.TabItem('Volunteer Assessment'):
+                gr.Markdown('### Gaokao Volunteer Assessment Tool')
+                gr.Markdown('Fill in your details below to get personalized university recommendations.')
+                with gr.Row():
+                    vf_province = gr.Dropdown(choices=['Beijing','Shanghai','Guangdong','Zhejiang','Jiangsu','Sichuan','Hubei','Shandong','Henan','Hebei','Fujian','Other'], label='Province', value='Beijing')
+                    vf_score = gr.Number(label='Score', minimum=0, maximum=750, value=600)
+                    vf_category = gr.Radio(choices=['Physics','History'], label='Category', value='Physics')
+                vf_interests = gr.Textbox(label='Interests (comma separated)', placeholder='e.g. Computer Science, Medicine, Finance')
+                with gr.Row():
+                    vf_submit = gr.Button('Assess', variant='primary')
+                    vf_clear = gr.Button('Clear')
+                vf_output = gr.Textbox(label='Assessment Result', lines=15, interactive=False)
+                vf_submit.click(fn=volunteer_form_fn, inputs=[vf_province, vf_score, vf_category, vf_interests], outputs=[vf_output])
+                vf_clear.click(lambda: ('Beijing',600,'Physics','',''), None, [vf_province, vf_score, vf_category, vf_interests, vf_output])
+            # Tab 3: Quote Search
+            with gr.TabItem('Quote Search'):
+                gr.Markdown('### Zhang Xuefeng Quote Search')
+                gr.Markdown('Search through Zhang Xuefeng speeches, videos and articles.')
+                with gr.Row():
+                    qs_query = gr.Textbox(label='Search keywords', placeholder='Enter keywords...', scale=4)
+                    qs_top_k = gr.Slider(minimum=1, maximum=20, value=5, step=1, label='Results count')
+                qs_submit = gr.Button('Search', variant='primary')
+                qs_output = gr.Markdown()
+                qs_submit.click(fn=quote_search_fn, inputs=[qs_query, qs_top_k], outputs=[qs_output])
+    return demo
+
+if __name__ == '__main__':
+    demo = create_ui()
+    demo.launch(server_port=config.gradio_port, share=config.gradio_share,
+                css='.health-ok { color: #22c55e; } .health-warn { color: #eab308; }')
