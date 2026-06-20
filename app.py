@@ -267,7 +267,7 @@ def chat_fn(message, history):
 
 
 # ============================================================================
-# Volunteer Assessment Form Handler
+# 志愿评估 Form Handler
 # ============================================================================
 
 
@@ -309,7 +309,7 @@ def volunteer_form_fn(province, score, category, interests):
 
 
 # ============================================================================
-# Quote Search Handler
+# 语录搜索 Handler
 # ============================================================================
 
 
@@ -354,34 +354,34 @@ def get_health_status():
     # SQLite
     try:
         db.execute("SELECT 1")
-        status['SQLite'] = 'ok'
+        status['数据库'] = '正常'
     except Exception as e:
-        status['SQLite'] = f'error: {e}'
+        status['数据库'] = f'异常: {e}'
 
     # ChromaDB / NumpyCollection
     try:
         count = len(chroma_col._ids) if hasattr(chroma_col, '_ids') else '?'
-        status['ChromaDB'] = f'ok ({count} chunks)'
+        status['知识库'] = f'正常 ({count} 条)'
     except Exception as e:
-        status['ChromaDB'] = f'error: {e}'
+        status['知识库'] = f'异常: {e}'
 
     # Embedding
-    status['Embedding'] = f'ok (mode={config.embedding_mode})'
+    status['向量模型'] = f'正常 (mode={config.embedding_mode})'
 
     # Reranker
-    status['Reranker'] = f'ok (mode={config.reranker_mode})'
+    status['重排序'] = f'正常 (mode={config.reranker_mode})'
 
     # LLM Primary
     if llm_primary:
-        status['LLM Primary'] = f'ok ({config.llm_primary_model})'
+        status['主模型'] = f'正常 ({config.llm_primary_model})'
     else:
-        status['LLM Primary'] = 'not configured'
+        status['主模型'] = '未配置'
 
     # LLM Fallback
     if llm_fallback:
-        status['LLM Fallback'] = f'ok ({config.llm_fallback_model})'
+        status['备用模型'] = f'正常 ({config.llm_fallback_model})'
     else:
-        status['LLM Fallback'] = 'not configured'
+        status['备用模型'] = '未配置'
 
     return status
 
@@ -389,9 +389,9 @@ def get_health_status():
 def get_health_markdown():
     # Render health status as markdown table.
     status = get_health_status()
-    lines_md = ["| Service | Status |", "|---------|--------|"]
+    lines_md = ["| 服务 | 状态 |", "|------|------|"]
     for svc, st in status.items():
-        emoji = '✅' if st.startswith('ok') else '⚠️'
+        emoji = '✅' if st.startswith('正常') else '⚠️'
         lines_md.append(f'| {svc} | {emoji} {st} |')
     return "\n".join(lines_md)
 
@@ -406,44 +406,44 @@ def create_ui():
         '.health-ok { color: #22c55e; } '
         '.health-warn { color: #eab308; }'
     )
-    with gr.Blocks(title='zhangxuefeng Knowledge Agent') as demo:
-        gr.Markdown('# zhangxuefeng Knowledge Agent')
-        gr.Markdown('Powered by Zhang Xuefeng knowledge distillation -- AI for education planning.')
-        with gr.Accordion('System Health', open=False):
+    with gr.Blocks(title='张雪峰知识蒸馏 Agent') as demo:
+        gr.Markdown('# 张雪峰知识蒸馏 Agent')
+        gr.Markdown('基于张雪峰老师公开言论与教育数据构建的 AI 教育规划助手。')
+        with gr.Accordion('系统状态', open=False):
             health_md = gr.Markdown(value=get_health_markdown(), every=30)
         with gr.Tabs():
-            with gr.TabItem('Smart Q&A'):
-                qa_chatbot = gr.Chatbot(height=550, label='Conversation')
-                qa_input = gr.Textbox(placeholder='Ask your question about education, career, etc...', label='Your message', scale=4)
+            with gr.TabItem('智能问答'):
+                qa_chatbot = gr.Chatbot(height=550, label='对话')
+                qa_input = gr.Textbox(placeholder='输入你的问题，如：河南理科580分计算机推荐什么学校...', label='你的问题', scale=4)
                 with gr.Row():
-                    qa_submit = gr.Button('Send', variant='primary')
-                    qa_clear = gr.Button('Clear')
+                    qa_submit = gr.Button('发送', variant='primary')
+                    qa_clear = gr.Button('清空')
                 qa_submit.click(fn=chat_fn, inputs=[qa_input, qa_chatbot], outputs=[qa_chatbot])
                 qa_input.submit(fn=chat_fn, inputs=[qa_input, qa_chatbot], outputs=[qa_chatbot])
                 qa_clear.click(lambda: ([], ''), None, [qa_chatbot, qa_input])
-            # Tab 2: Volunteer Assessment
-            with gr.TabItem('Volunteer Assessment'):
-                gr.Markdown('### Gaokao Volunteer Assessment Tool')
-                gr.Markdown('Fill in your details below to get personalized university recommendations.')
+            # Tab 2: 志愿评估
+            with gr.TabItem('志愿评估'):
+                gr.Markdown('### 高考志愿评估工具')
+                gr.Markdown('填写以下信息，获取个性化院校和专业推荐。')
                 with gr.Row():
-                    vf_province = gr.Dropdown(choices=['Beijing','Shanghai','Guangdong','Zhejiang','Jiangsu','Sichuan','Hubei','Shandong','Henan','Hebei','Fujian','Other'], label='Province', value='Beijing')
-                    vf_score = gr.Number(label='Score', minimum=0, maximum=750, value=600)
-                    vf_category = gr.Radio(choices=['Physics','History'], label='Category', value='Physics')
-                vf_interests = gr.Textbox(label='Interests (comma separated)', placeholder='e.g. Computer Science, Medicine, Finance')
+                    vf_province = gr.Dropdown(choices=['北京','上海','广东','浙江','江苏','四川','湖北','山东','河南','河北','福建','其他'], label='省份', value='北京')
+                    vf_score = gr.Number(label='分数', minimum=0, maximum=750, value=600)
+                    vf_category = gr.Radio(choices=['物理类','历史类'], label='科类', value='物理类')
+                vf_interests = gr.Textbox(label='意向专业（逗号分隔）', placeholder='如：计算机、医学、金融')
                 with gr.Row():
-                    vf_submit = gr.Button('Assess', variant='primary')
-                    vf_clear = gr.Button('Clear')
-                vf_output = gr.Textbox(label='Assessment Result', lines=15, interactive=False)
+                    vf_submit = gr.Button('开始评估', variant='primary')
+                    vf_clear = gr.Button('清空')
+                vf_output = gr.Textbox(label='评估结果', lines=15, interactive=False)
                 vf_submit.click(fn=volunteer_form_fn, inputs=[vf_province, vf_score, vf_category, vf_interests], outputs=[vf_output])
-                vf_clear.click(lambda: ('Beijing',600,'Physics','',''), None, [vf_province, vf_score, vf_category, vf_interests, vf_output])
-            # Tab 3: Quote Search
-            with gr.TabItem('Quote Search'):
-                gr.Markdown('### Zhang Xuefeng Quote Search')
-                gr.Markdown('Search through Zhang Xuefeng speeches, videos and articles.')
+                vf_clear.click(lambda: ('北京',600,'物理类','',''), None, [vf_province, vf_score, vf_category, vf_interests, vf_output])
+            # Tab 3: 语录搜索
+            with gr.TabItem('语录搜索'):
+                gr.Markdown('### 张雪峰语录搜索')
+                gr.Markdown('搜索张雪峰老师在直播、演讲、文章中的相关语录。')
                 with gr.Row():
-                    qs_query = gr.Textbox(label='Search keywords', placeholder='Enter keywords...', scale=4)
-                    qs_top_k = gr.Slider(minimum=1, maximum=20, value=5, step=1, label='Results count')
-                qs_submit = gr.Button('Search', variant='primary')
+                    qs_query = gr.Textbox(label='搜索关键词', placeholder='输入关键词...', scale=4)
+                    qs_top_k = gr.Slider(minimum=1, maximum=20, value=5, step=1, label='返回条数')
+                qs_submit = gr.Button('搜索', variant='primary')
                 qs_output = gr.Markdown()
                 qs_submit.click(fn=quote_search_fn, inputs=[qs_query, qs_top_k], outputs=[qs_output])
     return demo
