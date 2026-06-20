@@ -1,117 +1,66 @@
-"""Unified embedding service with API and local backend abstraction.
-
-Provides a single :class:`EmbeddingService` facade that selects between
-:class:`APIEmbeddingBackend` (SiliconFlow) and :class:`LocalEmbeddingBackend`
-(BGE-M3 via FlagEmbedding) based on configuration.
-"""
+"""Unified embedding with auto GPU detection and CPU fallback."""
 
 import os
 
 
-# ── Facade ──────────────────────────────────────────────────────────────
-
-
 class EmbeddingService:
-    """Unified embedding service that delegates to API or local backend.
-
-    Parameters
-    ----------
-    mode : str
-        ``"api"`` or ``"local"``.
-    api_key : str
-        API key for the embedding provider (SiliconFlow).
-    model : str
-        Model name (used for API mode, and as default local model path).
-    local_path : str
-        Filesystem path to the local BGE-M3 model directory.
-    """
-
-    def __init__(
-        self,
-        mode: str = "api",
-        api_key: str = "",
-        model: str = "BAAI/bge-m3",
-        local_path: str = "",
-    ):
+    def __init__(self, mode="auto", api_key="", model="BAAI/bge-m3",
+                 local_path=""):
+        if mode == "auto":
+            mode = self._detect_best_mode(api_key)
         self.mode = mode
+        self.device_info = self._get_device_info()
+
         if mode == "api":
-            self.backend: object = APIEmbeddingBackend(api_key, model)
+            self.backend = APIEmbeddingBackend(api_key, model)
+        elif mode == "cpu":
+            self.backend = LocalEmbeddingBackend(
+                local_path or model, device="cpu"
+            )
         else:
-            self.backend: object = LocalEmbeddingBackend(
-                local_path or model
+            self.backend = LocalEmbeddingBackend(
+                local_path or model, device="cuda"
             )
 
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for a batch of texts.
+    @staticmethod
+    def _detect_best_mode(api_key):
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return "local"
+        except ImportError:
+            pass
+        if api_key or os.getenv("ZXF_EMBEDDING_API_KEY"):
+            return "api"
+        return "cpu"
 
-        Parameters
-        ----------
-        texts : list[str]
-            Input texts to embed.
+    @staticmethod
+    def _get_device_info():
+        try:
+            import torch
+            if torch.cuda.is_available():
+                return f"GPU: {torch.cuda.get_device_name(0)}"
+            return "CPU (no GPU detected)"
+        except ImportError:
+            return "CPU (torch not installed)"
 
-        Returns
-        -------
-        list[list[float]]
-            One embedding vector per input text.
-        """
+    def embed(self, texts):
         return self.backend.encode(texts)
 
-    def embed_query(self, text: str) -> list[float]:
-        """Generate a single embedding for a query.
-
-        If the backend provides ``encode_query``, it is used directly;
-        otherwise the call falls back to ``embed([text])[0]``.
-
-        Parameters
-        ----------
-        text : str
-            The query text.
-
-        Returns
-        -------
-        list[float]
-            Embedding vector for the query.
-        """
+    def embed_query(self, text):
         if hasattr(self.backend, "encode_query"):
             return self.backend.encode_query(text)
         return self.embed([text])[0]
 
-
-# ── API Backend ─────────────────────────────────────────────────────────
-
-
+# -- API Backend --
 class APIEmbeddingBackend:
-    """Embedding backend that calls a remote API (SiliconFlow).
+    def __init__(self, api_key="", model="BAAI/bge-m3"):
+        self.api_key = api_key or os.getenv("ZXF_EMBEDDING_API_KEY", "")
+        self.model = model
+        self.base_url = "https://api.siliconflow.cn/v1"
 
-    Parameters
-    ----------
-    api_key : str
-        API key.  Falls back to the ``ZXF_EMBEDDING_API_KEY`` environment
-        variable when empty.
-    model : str
-        Model identifier sent to the API.
-    """
-
-    def __init__(self, api_key: str = "", model: str = "BAAI/bge-m3"):
-        self.api_key: str = api_key or os.getenv("ZXF_EMBEDDING_API_KEY", "")
-        self.model: str = model
-        self.base_url: str = "https://api.siliconflow.cn/v1"
-
-    def encode(self, texts: list[str]) -> list[list[float]]:
-        """Send *texts* to the embeddings API and return dense vectors.
-
-        Parameters
-        ----------
-        texts : list[str]
-            Texts to embed.
-
-        Returns
-        -------
-        list[list[float]]
-            Embedding vectors sorted by the API response index.
-        """
+    def encode(self, texts):
         import requests
-
         resp = requests.post(
             f"{self.base_url}/embeddings",
             headers={"Authorization": f"Bearer {self.api_key}"},
@@ -120,88 +69,43 @@ class APIEmbeddingBackend:
         )
         resp.raise_for_status()
         data = resp.json()
-        return [
-            d["embedding"]
-            for d in sorted(data["data"], key=lambda x: x["index"])
-        ]
+        return [d["embedding"] for d in
+                sorted(data["data"], key=lambda x: x["index"])]
 
-    def encode_query(self, text: str) -> list[float]:
-        """Embed a single query string.
-
-        Parameters
-        ----------
-        text : str
-            The query text.
-
-        Returns
-        -------
-        list[float]
-            Embedding vector.
-        """
+    def encode_query(self, text):
         return self.encode([text])[0]
 
 
-# ── Local Backend ───────────────────────────────────────────────────────
-
-
+# -- Local Backend (GPU or CPU) --
 class LocalEmbeddingBackend:
-    """Embedding backend that runs BGE-M3 via FlagEmbedding locally.
+    def __init__(self, model_name="BAAI/bge-m3", device=None):
+        import torch
+        if device is None:
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device = device
+        self.model_name = model_name
+        self._model = None
 
-    The model is loaded lazily on the first call to :meth:`encode` or
-    :meth:`encode_query`, so construction is always cheap.
-
-    Parameters
-    ----------
-    model_path : str
-        Filesystem path to the BGE-M3 model directory.
-    """
-
-    def __init__(self, model_path: str):
-        self.model_path: str = model_path
-        self._model = None  # lazy – loaded on first use
-
-    def _load_model(self):
-        """Lazy-import and instantiate the BGE-M3 model."""
+    def _ensure_model(self):
+        if self._model is not None:
+            return
         from FlagEmbedding import BGEM3FlagModel
+        use_fp16 = (self.device == "cuda")
+        print(f"Loading {self.model_name} on {self.device} "
+              f"(fp16={use_fp16})...")
+        self._model = BGEM3FlagModel(
+            self.model_name,
+            use_fp16=use_fp16,
+            device=self.device,
+        )
+        print("Model loaded.")
 
-        self._model = BGEM3FlagModel(self.model_path, use_fp16=True)
-
-    @property
-    def model(self):
-        """The underlying ``BGEM3FlagModel`` instance (lazy-loaded)."""
-        if self._model is None:
-            self._load_model()
-        return self._model
-
-    def encode(self, texts: list[str]) -> list[list[float]]:
-        """Encode *texts* with the local BGE-M3 model.
-
-        Parameters
-        ----------
-        texts : list[str]
-            Texts to embed.
-
-        Returns
-        -------
-        list[list[float]]
-            Dense embedding vectors.
-        """
-        if self._model is None:
-            self._load_model()
-        result = self._model.encode(texts, batch_size=32)
+    def encode(self, texts):
+        self._ensure_model()
+        result = self._model.encode(
+            texts, batch_size=8 if self.device == "cpu" else 32
+        )
         return result["dense_vecs"].tolist()
 
-    def encode_query(self, text: str) -> list[float]:
-        """Embed a single query with the local model.
-
-        Parameters
-        ----------
-        text : str
-            The query text.
-
-        Returns
-        -------
-        list[float]
-            Embedding vector.
-        """
+    def encode_query(self, text):
         return self.encode([text])[0]

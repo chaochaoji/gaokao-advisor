@@ -50,12 +50,12 @@ chroma_count = len(chroma_col._ids) if hasattr(chroma_col, '_ids') else 'unknown
 logger.log_info('chromadb', 'collection_loaded', {'count': chroma_count})
 
 embedding_svc = EmbeddingService(
-    mode=config.embedding_mode,
+    mode="auto",
     api_key=config.embedding_api_key,
     model=config.embedding_model,
     local_path=config.embedding_local_path,
 )
-logger.log_info('embedding', 'service_initialized', {'mode': config.embedding_mode})
+logger.log_info('embedding', 'service_initialized', {'mode': embedding_svc.mode, 'device': embedding_svc.device_info})
 
 reranker = RerankerService(
     mode=config.reranker_mode,
@@ -366,7 +366,7 @@ def get_health_status():
         status['知识库'] = f'异常: {e}'
 
     # Embedding
-    status['向量模型'] = f'正常 (mode={config.embedding_mode})'
+    status['向量模型'] = f'正常 ({embedding_svc.mode}, {embedding_svc.device_info})'
 
     # Reranker
     status['重排序'] = f'正常 (mode={config.reranker_mode})'
@@ -503,7 +503,7 @@ def create_ui():
                     s_fm = gr.Textbox(label='备用模型名称', value=config.llm_fallback_model)
                 with gr.Row():
                     s_ek = gr.Textbox(label='Embedding API Key', placeholder='sk-...', type='password')
-                    s_em = gr.Radio(choices=['api', 'local'], label='Embedding 模式', value=config.embedding_mode)
+                    s_em = gr.Radio(choices=['auto', 'api', 'local', 'cpu'], label='Embedding 模式', value='auto')
                 with gr.Row():
                     s_rm = gr.Radio(choices=['api', 'local', 'mock'], label='Reranker 模式', value=config.reranker_mode)
                     s_pt = gr.Number(label='服务端口', value=config.gradio_port, precision=0)
