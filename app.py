@@ -58,7 +58,7 @@ embedding_svc = EmbeddingService(
 logger.log_info('embedding', 'service_initialized', {'mode': embedding_svc.mode, 'device': embedding_svc.device_info})
 
 reranker = RerankerService(
-    mode=config.reranker_mode,
+    mode="auto",
     model=config.reranker_model,
 )
 logger.log_info('reranker', 'service_initialized', {'mode': config.reranker_mode})

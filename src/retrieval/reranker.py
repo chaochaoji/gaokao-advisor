@@ -26,14 +26,36 @@ class RerankerService:
         Re-ranker model name used for API or local inference.
     """
 
-    def __init__(self, mode: str = "api", model: str = "BAAI/bge-reranker-v2-m3"):
+    LOCAL_MODEL_DIR = os.path.join(
+        os.path.dirname(__file__), "..", "..", "models", "BAAI", "bge-reranker-v2-m3"
+    )
+
+    def __init__(self, mode: str = "auto", model: str = "BAAI/bge-reranker-v2-m3"):
+        if mode == "auto":
+            mode = self._detect_best_mode()
         self.mode = mode
         self.model = model
         self._local_model = None
         if mode == "local":
-            from FlagEmbedding import FlagReranker
+            self._init_local()
+        if mode == "local":
+            self._init_local()
 
-            self._local_model = FlagReranker(model, use_fp16=True)
+    @staticmethod
+    def _detect_best_mode():
+        if os.path.exists(RerankerService.LOCAL_MODEL_DIR):
+            return "local"
+        if os.getenv("ZXF_EMBEDDING_API_KEY"):
+            return "api"
+        return "mock"
+
+    def _init_local(self):
+        from FlagEmbedding import FlagReranker
+        import torch
+        path = self.LOCAL_MODEL_DIR if os.path.exists(self.LOCAL_MODEL_DIR) else self.model
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        self._local_model = FlagReranker(path, use_fp16=(device == "cuda"), device=device)
+        self.mode = "local"
 
     # ------------------------------------------------------------------
     # Public API
