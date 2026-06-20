@@ -400,6 +400,52 @@ def get_health_markdown():
 # ============================================================================
 # Gradio UI
 # ============================================================================
+SETTINGS_FILE = os.path.join(_PROJECT_ROOT, '.env')
+def load_settings():
+    settings = {}
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, val = line.split('=', 1)
+                    settings[key.strip()] = val.strip()
+    return settings
+def save_settings(llm_primary_key, llm_primary_model,
+                  llm_fallback_key, llm_fallback_model,
+                  embedding_key, embedding_mode,
+                  reranker_mode, gradio_port):
+    lines = [
+        '# Zhang Xuefeng Agent - Environment Configuration',
+        '# Generated from Settings panel',
+        '',
+        f'ZXF_LLM_PRIMARY_API_KEY={llm_primary_key}',
+        f'ZXF_LLM_PRIMARY_MODEL={llm_primary_model}',
+        f'ZXF_LLM_FALLBACK_API_KEY={llm_fallback_key}',
+        f'ZXF_LLM_FALLBACK_MODEL={llm_fallback_model}',
+        f'ZXF_EMBEDDING_API_KEY={embedding_key}',
+        f'ZXF_EMBEDDING_MODE={embedding_mode}',
+        f'ZXF_RERANKER_MODE={reranker_mode}',
+        f'GRADIO_PORT={gradio_port}',
+        '',
+    ]
+    with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+        f.write(chr(10).join(lines))
+    return '配置已保存到 .env 文件！请重启服务使配置生效。'
+def get_current_settings():
+    s = load_settings()
+    return [
+        s.get('ZXF_LLM_PRIMARY_API_KEY', ''),
+        s.get('ZXF_LLM_PRIMARY_MODEL', config.llm_primary_model),
+        s.get('ZXF_LLM_FALLBACK_API_KEY', ''),
+        s.get('ZXF_LLM_FALLBACK_MODEL', config.llm_fallback_model),
+        s.get('ZXF_EMBEDDING_API_KEY', ''),
+        s.get('ZXF_EMBEDDING_MODE', config.embedding_mode),
+        s.get('ZXF_RERANKER_MODE', config.reranker_mode),
+        s.get('GRADIO_PORT', str(config.gradio_port)),
+    ]
+
+
 def create_ui():
     import gradio as gr
     custom_css = (
@@ -446,6 +492,27 @@ def create_ui():
                 qs_submit = gr.Button('搜索', variant='primary')
                 qs_output = gr.Markdown()
                 qs_submit.click(fn=quote_search_fn, inputs=[qs_query, qs_top_k], outputs=[qs_output])
+            with gr.TabItem('系统设置'):
+                gr.Markdown('### 服务配置')
+                gr.Markdown('修改配置后点击保存，然后重启服务使配置生效。')
+                with gr.Row():
+                    s_pk = gr.Textbox(label='主模型 API Key', placeholder='sk-ant-...', type='password')
+                    s_pm = gr.Textbox(label='主模型名称', value=config.llm_primary_model)
+                with gr.Row():
+                    s_fk = gr.Textbox(label='备用模型 API Key', placeholder='sk-...', type='password')
+                    s_fm = gr.Textbox(label='备用模型名称', value=config.llm_fallback_model)
+                with gr.Row():
+                    s_ek = gr.Textbox(label='Embedding API Key', placeholder='sk-...', type='password')
+                    s_em = gr.Radio(choices=['api', 'local'], label='Embedding 模式', value=config.embedding_mode)
+                with gr.Row():
+                    s_rm = gr.Radio(choices=['api', 'local', 'mock'], label='Reranker 模式', value=config.reranker_mode)
+                    s_pt = gr.Number(label='服务端口', value=config.gradio_port, precision=0)
+                with gr.Row():
+                    s_save = gr.Button('保存配置', variant='primary')
+                    s_load = gr.Button('加载当前配置')
+                s_msg = gr.Markdown('')
+                s_load.click(fn=get_current_settings, inputs=[], outputs=[s_pk, s_pm, s_fk, s_fm, s_ek, s_em, s_rm, s_pt])
+                s_save.click(fn=save_settings, inputs=[s_pk, s_pm, s_fk, s_fm, s_ek, s_em, s_rm, s_pt], outputs=[s_msg])
     return demo
 
 if __name__ == '__main__':
