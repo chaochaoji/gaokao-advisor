@@ -452,7 +452,7 @@ def create_ui():
         '.health-ok { color: #22c55e; } '
         '.health-warn { color: #eab308; }'
     )
-    with gr.Blocks(title='张雪峰知识蒸馏 Agent') as demo:
+    with gr.Blocks(title='张雪峰知识蒸馏 Agent', css='.health-ok { color: #22c55e; } .health-warn { color: #eab308; }') as demo:
         gr.Markdown('# 张雪峰知识蒸馏 Agent')
         gr.Markdown('基于张雪峰老师公开言论与教育数据构建的 AI 教育规划助手。')
         with gr.Accordion('系统状态', open=False):
@@ -518,4 +518,4 @@ def create_ui():
 if __name__ == '__main__':
     demo = create_ui()
     demo.launch(server_port=config.gradio_port, share=config.gradio_share,
-                css='.health-ok { color: #22c55e; } .health-warn { color: #eab308; }')
+                show_error=True)
