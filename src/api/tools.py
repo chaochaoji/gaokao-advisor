@@ -13,7 +13,7 @@ _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(
 SETTINGS_FILE = os.path.join(_PROJECT_ROOT, ".env")
 
 class VolunteerInput(BaseModel):
-    province: str = "北京"; score: int = 600
+    province: str = "北京"; score: int = 600; rank: int = 0
     category: str = "物理类"; interests: str = ""
 
 class QuoteInput(BaseModel):
@@ -25,8 +25,9 @@ def volunteer_tool(data: VolunteerInput):
         return {"error": "请至少填写省份和分数。"}
     query = f"{data.province}{data.category}{data.score}分 志愿填报推荐"
     if data.interests: query += f" 对{data.interests}感兴趣"
+    if data.rank: query += f" 位次{data.rank}"
     context = {"province":data.province, "score":data.score, "category":data.category or "物理类",
-               "interests":[i.strip() for i in data.interests.split(",") if i.strip()]}
+               "interests":[i.strip() for i in data.interests.split(",") if i.strip()], "rank":data.rank}
     results = hybrid_search.search(query, "volunteer", context)
     prompt = build_prompt("volunteer", context)
     nl = chr(10)
