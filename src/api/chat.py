@@ -29,22 +29,26 @@ async def chat_stream(msg: str, session: str = "new", mode: str = "agent"):
     async def gen():
         # Safety
         check = safety.check(msg)
+        logger.log_info("chat", "safety_pass", {"msg_len": len(msg)})
         if not check["safe"]:
             rm = REJECT.get(check["category"], "[安全提醒] 消息包含不适当内容。")
             yield await _sse("thinking", {"text": f"Safety: {check['category']}"})
             yield await _sse("token", {"text": rm})
             yield await _sse("done", {"thinking_time": round(time.time()-t0,2)})
+            logger.log_warning("chat", "msg_blocked", category=check["category"])
             return
 
         # Validate or create session
         sid = session
         if not sid or sid == "new" or not any(s["id"] == sid for s in session_store.list_sessions()):
             sid = session_store.create_session()
+        logger.log_info("chat", "session_ready", {"sid": sid})
         ctx = SessionContext()
 
         # Intent routing
         intent = classify_intent(lambda sp,um: _call_llm(sp,um), msg)
         scene = intent.get("scene", "general")
+        logger.log_info("chat", "intent", {"scene": scene, "confidence": f"{intent.get('confidence',0):.2f}"})
         yield await _sse("thinking", {"text": f"Intent: {scene} (confidence: {intent.get('confidence',0):.2f})"})
 
         # Search
@@ -53,6 +57,7 @@ async def chat_stream(msg: str, session: str = "new", mode: str = "agent"):
         yield await _sse("thinking", {"text": f"Found {len(results)} results", "sources": sources})
 
         # Handler
+        logger.log_info("chat", "llm_start", {"scene": scene, "model": config.llm_primary_model or config.llm_fallback_model})
         handler = HANDLERS.get(scene, fb_h)
         response = handler(msg, ctx.get_context()["context_state"], results, lambda p,um=None: _call_llm(p,um))
 
@@ -60,6 +65,7 @@ async def chat_stream(msg: str, session: str = "new", mode: str = "agent"):
         for i in range(0, len(response), 30):
             yield await _sse("token", {"text": response[i:i+30]})
 
+        logger.log_info("chat", "response_done", {"len": len(response), "time": f"{time.time()-t0:.1f}s"})
         session_store.add_turn(sid, msg, response)
         ctx.update(msg)
         yield await _sse("done", {"session_id": sid, "scene": scene, "thinking_time": round(time.time()-t0,2)})
@@ -111,22 +117,27 @@ def _call_llm(sp, um=None):
         return "[系统提示] LLM 未配置，请在设置中填入 API Key。"
 
     last_error = ""
+    logger.log_info("llm", "calling", {"kind": pairs[0][2], "model": pairs[0][1]})
     for client, model, kind in pairs:
         try:
             if kind == "anthropic":
                 kw = {}
                 if sp: kw["system"] = sp
                 resp = client.messages.create(model=model, max_tokens=2048, messages=[{"role":"user","content":um}], **kw)
+                logger.log_info("llm", "response_ok", {"kind": kind, "model": model})
                 return resp.content[0].text
             else:
                 msgs = []
                 if sp: msgs.append({"role":"system","content":sp})
                 msgs.append({"role":"user","content":um})
                 resp = client.chat.completions.create(model=model, messages=msgs, max_tokens=2048, temperature=0.7)
+                logger.log_info("llm", "response_ok", {"kind": kind, "model": model})
                 return resp.choices[0].message.content
         except Exception as e:
             last_error = str(e)[:200]
             logger.log_warning("llm", f"{kind}_call_failed", detail={"error": last_error})
+            if len(pairs) > 1:
+                logger.log_info("llm", "switching_fallback", {"from": kind, "to": pairs[1][2]})
             continue
 
     logger.log_error("llm", "all_failed", Exception(last_error))
