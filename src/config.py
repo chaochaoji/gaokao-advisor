@@ -35,7 +35,7 @@ class Config:
     llm_fallback_api_key: str = ""
     llm_fallback_base_url: str = "https://api.deepseek.com/v1"
     llm_fallback_api_type: str = "auto"  # "anthropic" | "openai" | "auto"
-    llm_timeout: int = 30
+    llm_timeout: int = 120
 
     # ── Embedding ────────────────────────────────────────────────────
     embedding_mode: str = "api"
