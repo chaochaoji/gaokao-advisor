@@ -68,33 +68,60 @@ async def chat_stream(msg: str, session: str = "new", mode: str = "agent"):
 
 
 def _call_llm(sp, um=None):
+    """Synchronous LLM call with primary → fallback retry."""
     import anthropic
     from openai import OpenAI
-    client = None; model = ""
+
+    if um is None:
+        um = sp; sp = None
+
+    # ── Build client + model pairs ──────────────────────────────
+    pairs = []
     if config.llm_primary_api_key:
         try:
-            client = anthropic.Anthropic(api_key=config.llm_primary_api_key, base_url=config.llm_primary_base_url or None, timeout=config.llm_timeout)
-            model = config.llm_primary_model
-        except Exception: pass
-    if client is None and config.llm_fallback_api_key:
+            c = anthropic.Anthropic(
+                api_key=config.llm_primary_api_key,
+                base_url=config.llm_primary_base_url or None,
+                timeout=config.llm_timeout)
+            pairs.append((c, config.llm_primary_model, "anthropic"))
+        except Exception as e:
+            logger.log_warning("llm", "primary_client_init_failed", detail={"error": str(e)})
+    if config.llm_fallback_api_key:
         try:
-            client = OpenAI(api_key=config.llm_fallback_api_key, base_url=config.llm_fallback_base_url, timeout=config.llm_timeout)
-            model = config.llm_fallback_model
-        except Exception: pass
-    if client is None: return "[系统提示] LLM 未配置。"
-    if um is None: um = sp; sp = None
-    try:
-        if hasattr(client, "messages"):
-            kw = {}; 
-            if sp: kw["system"] = sp
-            resp = client.messages.create(model=model, max_tokens=2048, messages=[{"role":"user","content":um}], **kw)
-            return resp.content[0].text
-        else:
-            msgs = []
-            if sp: msgs.append({"role":"system","content":sp})
-            msgs.append({"role":"user","content":um})
-            resp = client.chat.completions.create(model=model, messages=msgs, max_tokens=2048, temperature=0.7)
-            return resp.choices[0].message.content
-    except Exception as e:
-        logger.log_error("llm", "call_failed", e)
-        return "[系统提示] LLM 调用失败。"
+            c = OpenAI(
+                api_key=config.llm_fallback_api_key,
+                base_url=config.llm_fallback_base_url,
+                timeout=config.llm_timeout)
+            pairs.append((c, config.llm_fallback_model, "openai"))
+        except Exception as e:
+            logger.log_warning("llm", "fallback_client_init_failed", detail={"error": str(e)})
+
+    if not pairs:
+        return "[系统提示] LLM 未配置，请在设置中填入 API Key。"
+
+    # ── Try each pair in order ─────────────────────────────────
+    last_error = ""
+    for client, model, kind in pairs:
+        try:
+            if kind == "anthropic":
+                kw = {}
+                if sp: kw["system"] = sp
+                resp = client.messages.create(
+                    model=model, max_tokens=2048,
+                    messages=[{"role": "user", "content": um}], **kw)
+                return resp.content[0].text
+            else:
+                msgs = []
+                if sp: msgs.append({"role": "system", "content": sp})
+                msgs.append({"role": "user", "content": um})
+                resp = client.chat.completions.create(
+                    model=model, messages=msgs, max_tokens=2048, temperature=0.7)
+                return resp.choices[0].message.content
+        except Exception as e:
+            last_error = str(e)[:200]
+            logger.log_warning("llm", f"{kind}_call_failed", detail={"error": last_error})
+            continue  # try next pair
+
+    # All failed
+    logger.log_error("llm", "all_clients_failed", Exception(last_error))
+    return f"[系统提示] LLM 调用失败：{last_error}"
