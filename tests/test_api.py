@@ -69,13 +69,29 @@ class TestConfig:
         assert "llm_primary_model" in r.json()
 
     def test_save_config(self):
-        r = client.put("/api/config", json={
-            "llm_primary_model": "test-model", "llm_primary_api_key": "",
-            "llm_fallback_model": "", "llm_fallback_api_key": "",
-            "embedding_api_key": "", "embedding_mode": "api",
-            "reranker_mode": "mock", "gradio_port": 7860})
-        assert r.status_code == 200
-        assert r.json() == {"ok": True}
+        # Backup real .env to avoid corrupting user config
+        import os as _os
+        env_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), ".env")
+        backup = None
+        if _os.path.exists(env_path):
+            with open(env_path, "r", encoding="utf-8") as f:
+                backup = f.read()
+
+        try:
+            r = client.put("/api/config", json={
+                "llm_primary_model": "test-model", "llm_primary_api_key": "",
+                "llm_fallback_model": "", "llm_fallback_api_key": "",
+                "llm_primary_api_type": "auto", "llm_primary_base_url": "",
+                "llm_fallback_api_type": "auto", "llm_fallback_base_url": "",
+                "embedding_api_key": "", "embedding_mode": "api",
+                "reranker_mode": "mock", "gradio_port": 7860})
+            assert r.status_code == 200
+            assert r.json() == {"ok": True}
+        finally:
+            # Restore original .env
+            if backup is not None:
+                with open(env_path, "w", encoding="utf-8") as f:
+                    f.write(backup)
 
 
 class TestQuote:

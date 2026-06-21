@@ -26,7 +26,7 @@ class TestConfigDefaults:
 
     def test_default_llm_timeout(self):
         config = Config()
-        assert config.llm_timeout == 30
+        assert config.llm_timeout == 120
 
     # ── Embedding fields ──
     def test_default_embedding(self):
@@ -78,7 +78,7 @@ class TestLoadConfig:
         """When no ZXF_* vars are set, load_config returns a Config with defaults."""
         config = load_config()
         assert config.llm_primary_model == "claude-sonnet-4-6"
-        assert config.llm_timeout == 30
+        assert config.llm_timeout == 120
         assert config.gradio_port == 7860
         assert config.embedding_mode == "api"
 
@@ -172,5 +172,5 @@ class TestLoadConfig:
         """Fields without ZXF_ env vars keep their defaults."""
         # Ensure no relevant env vars are set (run in clean env)
         config = load_config()
-        assert config.llm_timeout == 30
+        assert config.llm_timeout == 120
         assert config.embedding_mode == "api"
