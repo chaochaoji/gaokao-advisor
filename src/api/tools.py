@@ -78,4 +78,21 @@ def save_config(data: ConfigInput):
              f"ZXF_GRADIO_PORT={data.gradio_port}", ""]
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         f.write(chr(10).join(lines))
+
+    # Hot-reload: update environment and in-memory config immediately
+    import os
+    os.environ["ZXF_LLM_PRIMARY_API_KEY"] = data.llm_primary_api_key
+    os.environ["ZXF_LLM_PRIMARY_MODEL"] = data.llm_primary_model
+    os.environ["ZXF_LLM_FALLBACK_API_KEY"] = data.llm_fallback_api_key
+    os.environ["ZXF_LLM_FALLBACK_MODEL"] = data.llm_fallback_model
+    os.environ["ZXF_EMBEDDING_API_KEY"] = data.embedding_api_key
+    os.environ["ZXF_EMBEDDING_MODE"] = data.embedding_mode
+    os.environ["ZXF_RERANKER_MODE"] = data.reranker_mode
+    os.environ["ZXF_GRADIO_PORT"] = str(data.gradio_port)
+
+    from src.config import load_config
+    fresh = load_config(load_env_file=False)
+    for field_name in config.__dataclass_fields__:
+        setattr(config, field_name, getattr(fresh, field_name))
+
     return {"ok": True}
