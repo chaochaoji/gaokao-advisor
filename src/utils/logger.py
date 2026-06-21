@@ -30,15 +30,27 @@ class AgentLogger:
 
         self.logger = logging.getLogger("zhangxuefeng")
         self.logger.setLevel(logging.DEBUG)
+        self.logger.handlers.clear()  # avoid duplicates on hot-reload
 
-        fmt = logging.Formatter(
+        # ── File handlers (JSON for grep / log analysis) ──────────
+        json_fmt = logging.Formatter(
             "%(asctime)s [%(levelname)s] %(message)s"
         )
         for fname, level in [("app.log", logging.DEBUG), ("error.log", logging.ERROR)]:
             h = logging.FileHandler(self.log_dir / fname, encoding="utf-8")
             h.setLevel(level)
-            h.setFormatter(fmt)
+            h.setFormatter(json_fmt)
             self.logger.addHandler(h)
+
+        # ── Console handler (human-readable, INFO+) ────────────────
+        console = logging.StreamHandler()
+        console.setLevel(logging.INFO)
+        console_fmt = logging.Formatter(
+            "%(asctime)s  %(levelname)-7s  %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        console.setFormatter(console_fmt)
+        self.logger.addHandler(console)
 
     def _update_health(self, component, status, detail):
         hp = self.log_dir / "health.json"
@@ -72,35 +84,39 @@ class AgentLogger:
                   user_query="", detail=None):
         error_type = type(error).__name__
         suggestion = self.SUGGESTIONS.get(component, {}).get(error_type, "")
-        entry = {
-            "timestamp": datetime.now().isoformat(), "level": "ERROR",
-            "component": component, "event": event,
-            "detail": {
-                "error": str(error), "error_type": error_type,
-                "traceback": traceback.format_exc(),
-                "fallback_action": fallback_action,
-                "fix_suggestion": suggestion,
-                "user_query": user_query,
-                **(detail or {})
-            }
-        }
-        self.logger.error(json.dumps(entry, ensure_ascii=False))
-        self._update_health(component, "unhealthy", entry["detail"])
+        self.logger.error(
+            "[%s] %s — %s: %s%s",
+            component, event, error_type, str(error)[:200],
+            f" (→ {fallback_action})" if fallback_action else "",
+        )
+        # Write full traceback to error.log only
+        for h in self.logger.handlers:
+            if isinstance(h, logging.FileHandler) and h.level <= logging.ERROR:
+                h.stream.write(f"\n{traceback.format_exc()}\n")
+                h.stream.flush()
+        self._update_health(component, "unhealthy", {
+            "error": str(error), "error_type": error_type,
+            "fallback_action": fallback_action,
+            "fix_suggestion": suggestion,
+            "user_query": user_query, **(detail or {}),
+        })
 
     def log_warning(self, component, event, fallback_action="", detail=None):
-        self.logger.warning(json.dumps({
-            "timestamp": datetime.now().isoformat(), "level": "WARNING",
-            "component": component, "event": event,
-            "fallback_action": fallback_action, "detail": detail or {}
-        }, ensure_ascii=False))
+        self.logger.warning(
+            "[%s] %s%s",
+            component, event,
+            f" (→ {fallback_action})" if fallback_action else "",
+        )
         self._update_health(component, "degraded", detail or {})
 
     def log_info(self, component, event, detail=None):
-        self.logger.info(json.dumps({
-            "timestamp": datetime.now().isoformat(), "level": "INFO",
-            "component": component, "event": event,
-            "detail": detail or {}
-        }, ensure_ascii=False))
+        extra = ""
+        if detail and isinstance(detail, dict):
+            parts = [f"{k}={v}" for k, v in detail.items()]
+            extra = "  " + " | ".join(parts[:4])
+        self.logger.info(
+            "[%s] %s%s", component, event, extra,
+        )
 
     def close(self):
         """Close and remove all logging handlers, releasing file handles."""
