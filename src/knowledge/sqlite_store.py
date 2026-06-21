@@ -24,7 +24,7 @@ def get_db(config: Config) -> sqlite3.Connection:
         A connection with ``row_factory = sqlite3.Row``, WAL journal
         mode, and foreign-key enforcement enabled.
     """
-    conn = sqlite3.connect(config.sqlite_path)
+    conn = sqlite3.connect(config.sqlite_path, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")

@@ -31,7 +31,7 @@ from src.agent.style_chat import handle as style_chat_handle
 from src.agent.fallback import handle as fallback_handle
 from src.safety.input_gateway import InputSafetyGateway
 from src.utils.logger import AgentLogger
-from src.utils.conversation import ConversationManager
+from src.utils.conversation import SessionContext
 
 
 # ============================================================================
@@ -58,7 +58,7 @@ embedding_svc = EmbeddingService(
 logger.log_info('embedding', 'service_initialized', {'mode': embedding_svc.mode, 'device': embedding_svc.device_info})
 
 reranker = RerankerService(
-    mode="auto",
+    mode="mock",
     model=config.reranker_model,
 )
 logger.log_info('reranker', 'service_initialized', {'mode': config.reranker_mode})
@@ -74,7 +74,7 @@ hybrid_search = HybridSearch(
 logger.log_info('hybrid_search', 'service_initialized')
 
 safety = InputSafetyGateway()
-conversation = ConversationManager()
+conversation = SessionContext()
 logger.log_info('safety', 'gateway_initialized')
 logger.log_info('conversation', 'manager_initialized')
 
@@ -263,7 +263,7 @@ def chat_fn(message, history):
         yield response_text[i:i + chunk_size]
 
     # --- Save conversation turn ---
-    conversation.add_turn(message, response_text)
+    conversation.update(message)
 
 
 # ============================================================================

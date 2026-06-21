@@ -2,6 +2,19 @@
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
+
+_ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
+
+
+def _load_dotenv_if_available() -> None:
+    if not _ENV_FILE.exists():
+        return
+    try:
+        from dotenv import load_dotenv
+        load_dotenv(_ENV_FILE)
+    except ImportError:
+        pass
 
 
 @dataclass
@@ -50,18 +63,20 @@ class Config:
     log_retention_days: int = 30
 
 
-def load_config() -> Config:
+def load_config(load_env_file: bool = True) -> Config:
     """Build a :class:`Config` from defaults, overridden by environment.
 
-    Environment variables use the ``ZXF_`` prefix followed by the
-    uppercase field name.  Values are coerced to the field's type
-    (``bool``, ``int``, or kept as ``str``).
+    When *load_env_file* is true (the default), ``.env`` in the project
+    root is loaded into ``os.environ`` first.
 
     Returns
     -------
     Config
         Fully resolved configuration object.
     """
+    if load_env_file:
+        _load_dotenv_if_available()
+
     config = Config()
     for field_name in Config.__dataclass_fields__:
         env_key = f"ZXF_{field_name.upper()}"
