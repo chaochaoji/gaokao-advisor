@@ -68,30 +68,27 @@ class TestConfig:
         assert r.status_code == 200
         assert "llm_primary_model" in r.json()
 
-    def test_save_config(self):
-        # Backup real .env to avoid corrupting user config
-        import os as _os
-        env_path = _os.path.join(_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))), ".env")
-        backup = None
-        if _os.path.exists(env_path):
-            with open(env_path, "r", encoding="utf-8") as f:
-                backup = f.read()
+    def test_save_config_ok(self, tmp_path):
+        """Test save returns ok, but writes to temp file, never touches real .env."""
+        import src.api.tools as tools_mod
 
+        # Point SETTINGS_FILE to temp, not real .env
+        orig = tools_mod.SETTINGS_FILE
+        tools_mod.SETTINGS_FILE = str(tmp_path / ".env")
         try:
             r = client.put("/api/config", json={
                 "llm_primary_model": "test-model", "llm_primary_api_key": "",
-                "llm_fallback_model": "", "llm_fallback_api_key": "",
                 "llm_primary_api_type": "auto", "llm_primary_base_url": "",
+                "llm_fallback_model": "", "llm_fallback_api_key": "",
                 "llm_fallback_api_type": "auto", "llm_fallback_base_url": "",
                 "embedding_api_key": "", "embedding_mode": "api",
                 "reranker_mode": "mock", "gradio_port": 7860})
             assert r.status_code == 200
             assert r.json() == {"ok": True}
+            # Verify it wrote to temp file, not real .env
+            assert (tmp_path / ".env").exists()
         finally:
-            # Restore original .env
-            if backup is not None:
-                with open(env_path, "w", encoding="utf-8") as f:
-                    f.write(backup)
+            tools_mod.SETTINGS_FILE = orig
 
 
 class TestQuote:
