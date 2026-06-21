@@ -53,15 +53,22 @@ def quote_tool(data: QuoteInput):
 @router.get("/config")
 def get_config():
     return {"llm_primary_model":config.llm_primary_model,
-            "llm_primary_api_key":"***" if config.llm_primary_api_key else "",
+            "llm_primary_api_key": config.llm_primary_api_key or "",
+            "llm_primary_api_type": config.llm_primary_api_type,
+            "llm_primary_base_url": config.llm_primary_base_url,
             "llm_fallback_model":config.llm_fallback_model,
-            "llm_fallback_api_key":"***" if config.llm_fallback_api_key else "",
+            "llm_fallback_api_key": config.llm_fallback_api_key or "",
+            "llm_fallback_api_type": config.llm_fallback_api_type,
+            "llm_fallback_base_url": config.llm_fallback_base_url,
+            "embedding_api_key": config.embedding_api_key or "",
             "embedding_mode":config.embedding_mode, "reranker_mode":config.reranker_mode,
             "gradio_port":config.gradio_port, "embedding_model":config.embedding_model}
 
 class ConfigInput(BaseModel):
-    llm_primary_api_key: str = ""; llm_primary_model: str = "claude-sonnet-4-6"
-    llm_fallback_api_key: str = ""; llm_fallback_model: str = "deepseek-chat"
+    llm_primary_api_key: str = ""; llm_primary_model: str = "deepseek-v4-pro"
+    llm_primary_api_type: str = "auto"; llm_primary_base_url: str = ""
+    llm_fallback_api_key: str = ""; llm_fallback_model: str = "deepseek-v4-pro"
+    llm_fallback_api_type: str = "auto"; llm_fallback_base_url: str = ""
     embedding_api_key: str = ""; embedding_mode: str = "api"
     reranker_mode: str = "api"; gradio_port: int = 7860
 
@@ -70,8 +77,12 @@ def save_config(data: ConfigInput):
     lines = ["# Zhang Xuefeng Agent - Environment Configuration", "",
              f"ZXF_LLM_PRIMARY_API_KEY={data.llm_primary_api_key}",
              f"ZXF_LLM_PRIMARY_MODEL={data.llm_primary_model}",
+             f"ZXF_LLM_PRIMARY_API_TYPE={data.llm_primary_api_type}",
+             f"ZXF_LLM_PRIMARY_BASE_URL={data.llm_primary_base_url}",
              f"ZXF_LLM_FALLBACK_API_KEY={data.llm_fallback_api_key}",
              f"ZXF_LLM_FALLBACK_MODEL={data.llm_fallback_model}",
+             f"ZXF_LLM_FALLBACK_API_TYPE={data.llm_fallback_api_type}",
+             f"ZXF_LLM_FALLBACK_BASE_URL={data.llm_fallback_base_url}",
              f"ZXF_EMBEDDING_API_KEY={data.embedding_api_key}",
              f"ZXF_EMBEDDING_MODE={data.embedding_mode}",
              f"ZXF_RERANKER_MODE={data.reranker_mode}",
@@ -83,8 +94,12 @@ def save_config(data: ConfigInput):
     import os
     os.environ["ZXF_LLM_PRIMARY_API_KEY"] = data.llm_primary_api_key
     os.environ["ZXF_LLM_PRIMARY_MODEL"] = data.llm_primary_model
+    os.environ["ZXF_LLM_PRIMARY_API_TYPE"] = data.llm_primary_api_type
+    os.environ["ZXF_LLM_PRIMARY_BASE_URL"] = data.llm_primary_base_url
     os.environ["ZXF_LLM_FALLBACK_API_KEY"] = data.llm_fallback_api_key
     os.environ["ZXF_LLM_FALLBACK_MODEL"] = data.llm_fallback_model
+    os.environ["ZXF_LLM_FALLBACK_API_TYPE"] = data.llm_fallback_api_type
+    os.environ["ZXF_LLM_FALLBACK_BASE_URL"] = data.llm_fallback_base_url
     os.environ["ZXF_EMBEDDING_API_KEY"] = data.embedding_api_key
     os.environ["ZXF_EMBEDDING_MODE"] = data.embedding_mode
     os.environ["ZXF_RERANKER_MODE"] = data.reranker_mode

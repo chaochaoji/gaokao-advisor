@@ -68,60 +68,66 @@ async def chat_stream(msg: str, session: str = "new", mode: str = "agent"):
 
 
 def _call_llm(sp, um=None):
-    """Synchronous LLM call with primary → fallback retry."""
+    """Synchronous LLM call with primary to fallback retry.
+
+    Uses config.llm_primary_api_type / config.llm_fallback_api_type
+    to decide SDK.  "auto" detects from model name or base URL.
+    """
     import anthropic
     from openai import OpenAI
 
     if um is None:
         um = sp; sp = None
 
-    # ── Build client + model pairs ──────────────────────────────
+    def _detect(kind, model, base_url):
+        if kind != "auto":
+            return kind
+        s = (model + base_url).lower()
+        if "claude" in s or "anthropic" in s:
+            return "anthropic"
+        return "openai"
+
+    def _build(api_key, model, base_url, api_type):
+        k = _detect(api_type, model, base_url or "")
+        try:
+            if k == "anthropic":
+                c = anthropic.Anthropic(api_key=api_key, base_url=base_url or None, timeout=config.llm_timeout)
+            else:
+                c = OpenAI(api_key=api_key, base_url=base_url, timeout=config.llm_timeout)
+            return (c, model, k)
+        except Exception as e:
+            logger.log_warning("llm", f"{k}_init_failed", detail={"error": str(e)})
+            return None
+
     pairs = []
     if config.llm_primary_api_key:
-        try:
-            c = anthropic.Anthropic(
-                api_key=config.llm_primary_api_key,
-                base_url=config.llm_primary_base_url or None,
-                timeout=config.llm_timeout)
-            pairs.append((c, config.llm_primary_model, "anthropic"))
-        except Exception as e:
-            logger.log_warning("llm", "primary_client_init_failed", detail={"error": str(e)})
+        p = _build(config.llm_primary_api_key, config.llm_primary_model, config.llm_primary_base_url, config.llm_primary_api_type)
+        if p: pairs.append(p)
     if config.llm_fallback_api_key:
-        try:
-            c = OpenAI(
-                api_key=config.llm_fallback_api_key,
-                base_url=config.llm_fallback_base_url,
-                timeout=config.llm_timeout)
-            pairs.append((c, config.llm_fallback_model, "openai"))
-        except Exception as e:
-            logger.log_warning("llm", "fallback_client_init_failed", detail={"error": str(e)})
+        p = _build(config.llm_fallback_api_key, config.llm_fallback_model, config.llm_fallback_base_url, config.llm_fallback_api_type)
+        if p: pairs.append(p)
 
     if not pairs:
         return "[系统提示] LLM 未配置，请在设置中填入 API Key。"
 
-    # ── Try each pair in order ─────────────────────────────────
     last_error = ""
     for client, model, kind in pairs:
         try:
             if kind == "anthropic":
                 kw = {}
                 if sp: kw["system"] = sp
-                resp = client.messages.create(
-                    model=model, max_tokens=2048,
-                    messages=[{"role": "user", "content": um}], **kw)
+                resp = client.messages.create(model=model, max_tokens=2048, messages=[{"role":"user","content":um}], **kw)
                 return resp.content[0].text
             else:
                 msgs = []
-                if sp: msgs.append({"role": "system", "content": sp})
-                msgs.append({"role": "user", "content": um})
-                resp = client.chat.completions.create(
-                    model=model, messages=msgs, max_tokens=2048, temperature=0.7)
+                if sp: msgs.append({"role":"system","content":sp})
+                msgs.append({"role":"user","content":um})
+                resp = client.chat.completions.create(model=model, messages=msgs, max_tokens=2048, temperature=0.7)
                 return resp.choices[0].message.content
         except Exception as e:
             last_error = str(e)[:200]
             logger.log_warning("llm", f"{kind}_call_failed", detail={"error": last_error})
-            continue  # try next pair
+            continue
 
-    # All failed
-    logger.log_error("llm", "all_clients_failed", Exception(last_error))
+    logger.log_error("llm", "all_failed", Exception(last_error))
     return f"[系统提示] LLM 调用失败：{last_error}"

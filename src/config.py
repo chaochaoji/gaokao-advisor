@@ -30,9 +30,11 @@ class Config:
     llm_primary_model: str = "claude-sonnet-4-6"
     llm_primary_api_key: str = ""
     llm_primary_base_url: str = "https://api.anthropic.com"
+    llm_primary_api_type: str = "auto"   # "anthropic" | "openai" | "auto"
     llm_fallback_model: str = "deepseek-chat"
     llm_fallback_api_key: str = ""
     llm_fallback_base_url: str = "https://api.deepseek.com/v1"
+    llm_fallback_api_type: str = "auto"  # "anthropic" | "openai" | "auto"
     llm_timeout: int = 30
 
     # ── Embedding ────────────────────────────────────────────────────
