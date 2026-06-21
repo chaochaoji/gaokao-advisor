@@ -36,7 +36,10 @@ async def chat_stream(msg: str, session: str = "new", mode: str = "agent"):
             yield await _sse("done", {"thinking_time": round(time.time()-t0,2)})
             return
 
-        sid = session if session and session != "new" else session_store.create_session()
+        # Validate or create session
+        sid = session
+        if not sid or sid == "new" or not any(s["id"] == sid for s in session_store.list_sessions()):
+            sid = session_store.create_session()
         ctx = SessionContext()
 
         # Intent routing
