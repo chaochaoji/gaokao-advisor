@@ -265,3 +265,54 @@
   color: #94a3b8;
   padding: .5rem 0;
 }
+
+/* ====== Settings Modal ====== */
+.hidden { display: none !important; }
+.settings-overlay {
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,.4);
+  z-index: 9998;
+  display: flex; align-items: center; justify-content: center;
+}
+.settings-modal {
+  background: #fff;
+  border-radius: 1rem;
+  width: 90%; max-width: 480px; max-height: 85vh;
+  overflow-y: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,.15);
+}
+.settings-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+.settings-header h3 { font-size: 1.125rem; font-weight: 700; color: #1e293b; }
+.settings-close-btn {
+  background: none; border: none;
+  font-size: 1.5rem; color: #94a3b8; cursor: pointer;
+  padding: 0 .25rem; line-height: 1;
+}
+.settings-close-btn:hover { color: #1e293b; }
+.settings-body { padding: 1rem 1.25rem; }
+.settings-section { margin-bottom: 1.25rem; }
+.settings-section h4 {
+  font-size: .8125rem; font-weight: 700; color: #64748b;
+  text-transform: uppercase; letter-spacing: .05em;
+  margin-bottom: .5rem;
+}
+.settings-footer { padding-top: .75rem; border-top: 1px solid #f1f5f9; }
+.settings-hint {
+  font-size: .75rem; color: #94a3b8; text-align: center; margin-top: .5rem;
+}
+.pill-input {
+  width: 100%; padding: .5rem .75rem;
+  border: 1px solid #e2e8f0; border-radius: .5rem;
+  font-size: .875rem; outline: none; transition: border-color .15s;
+}
+.pill-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 3px rgba(59,130,246,.1); }
+.pill-textarea {
+  width: 100%; padding: .5rem .75rem;
+  border: 1px solid #e2e8f0; border-radius: .5rem;
+  font-size: .875rem; outline: none; min-height: 80px; resize: vertical;
+  font-family: inherit;
+}
