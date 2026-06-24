@@ -25,6 +25,9 @@ openai-whisper>=20231117
 # Storage
 # sqlite3 is stdlib
 
+# Web Search (free, no API key)
+ddgs>=9.0
+
 # Testing
 pytest>=8.0
 pytest-asyncio>=0.23

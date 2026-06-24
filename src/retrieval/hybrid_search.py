@@ -105,6 +105,17 @@ class HybridSearch:
         # relevant 2025 batch-line / 分数位次 / 一分一段 data.
         fused = _inject_score_data(fused, self.chroma_col, query, context)
 
+        # Branch 4: Web search fallback (DuckDuckGo, free, no key required).
+        # Used when local RAG returns few or low-quality results.  Results
+        # carry metadata.content_type="web_result" for front-end labelling.
+        try:
+            from src.retrieval.web_search import web_search
+            web_results = web_search(query, max_results=3)
+            if web_results:
+                fused = fused + web_results  # append, don't RRF-fuse
+        except Exception:
+            pass
+
         # Optional re-ranking
         if self.reranker and fused:
             try:

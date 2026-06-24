@@ -61,6 +61,8 @@ ZXF_EMBEDDING_MODE=api
 
 # 服务端口
 GRADIO_PORT=7860
+
+# 联网搜索无需配置，DuckDuckGo 免费、无需 API Key
 ```
 
 ## 知识库
@@ -129,9 +131,10 @@ zhangxuefengagent/
 │   │   └── router.py       #   意图路由
 │   │
 │   ├── retrieval/          # 检索层
-│   │   ├── hybrid_search.py#   混合搜索（向量 + FTS5 + 注入）
+│   │   ├── hybrid_search.py#   混合搜索（向量+FTS5+注入+联网）
 │   │   ├── vector_search.py#   向量检索
 │   │   ├── keyword_search.py#   SQLite FTS5 检索
+│   │   ├── web_search.py   #   联网搜索（DuckDuckGo）
 │   │   ├── structured_query.py# 结构化 SQL 查询
 │   │   ├── embedding_service.py# Embedding 服务
 │   │   └── reranker.py     #   重排序
@@ -201,13 +204,14 @@ LLM 的推理核心是**志愿填报五步法**，贯穿在所有回答中：
   ├── ② 意图路由 ─────────────→ volunteer / opinion / style_chat / general
   │     基于关键词预检 + LLM 二次确认，不同意图走不同 prompt 模板
   │
-  ├── ③ 多路混合搜索 ─────────→ RRF 融合
+  ├── ③ 多路混合搜索 ─────────→ RRF 融合 + 联网兜底
   │     ├─ 向量检索（charbigram hash，语义兜底）
   │     ├─ FTS5 全文检索（SQLite 关键词匹配）
-  │     └─ 省份注入（扫描 ChromaDB 中 score_data 文档，匹配用户省份）
+  │     ├─ 省份注入（扫描 ChromaDB 中 score_data 文档，匹配用户省份）
+  │     └─ 联网搜索（DuckDuckGo 免费 API，本地结果不足时自动触发）
   │          │
   │     ┌────┴────┐
-  │     │ RRF 融合 │ ← 三路结果加权合并，score_data 文档置顶
+  │     │ RRF 融合 │ ← 三路结果加权合并，联网结果追加在末尾
   │     └────┬────┘
   │
   ├── ④ 位次精确提取 ─────────→ 从搜索结果中匹配一分一段表
@@ -236,7 +240,8 @@ LLM 的推理核心是**志愿填报五步法**，贯穿在所有回答中：
 |------|----------|------|
 | 安全检测 | `src/safety/input_gateway.py` | 拦截越狱/隐私/辱骂/地域攻击四类输入 |
 | 意图路由 | `src/agent/router.py` | 高分+省份关键词直接判定 volunteer；其余走 LLM 分类 |
-| 混合搜索 | `src/retrieval/hybrid_search.py` | 向量 + FTS5 + 省份注入，RRF 融合后取 Top 10 |
+| 混合搜索 | `src/retrieval/hybrid_search.py` | 向量 + FTS5 + 省份注入 + 联网，RRF 融合后取 Top 10 |
+| 联网搜索 | `src/retrieval/web_search.py` | DuckDuckGo 免费 API，本地结果不足时追加 3 条联网结果 |
 | 位次提取 | `src/api/tools.py` 中的 `_extract_rank_from_results` | 正则匹配 `\| N分 \| 位次 \|` 格式的表数据 |
 | LLM 生成 | `src/api/chat.py` 中的 `_call_llm` | 主模型优先，异常时自动切备用；prompt 模板在 `src/utils/prompt_templates.py` |
 | 位次覆写 | `src/api/tools.py` 第 244-252 行 | `result["summary"]["rank"] = exact_rank`，绕过 LLM 估算偏差 |
