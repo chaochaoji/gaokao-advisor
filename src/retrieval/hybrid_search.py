@@ -94,7 +94,7 @@ class HybridSearch:
         context = context or {}
 
         try:
-            vec_results = vector_search(self.embedding_svc, self.chroma_col, query, top_k=10)
+            vec_results = vector_search(self.embedding_svc, self.chroma_col, query, top_k=20)
         except Exception as e:
             if self.logger:
                 self.logger.log_warning("chromadb", "vector_search_failed", "skip_vector", {"error": str(e)})
@@ -109,14 +109,21 @@ class HybridSearch:
 
         fused = rrf_fusion(vec_results, kw_results)
 
-        if scene == "volunteer" and context.get("province") and context.get("score"):
+        if scene == "volunteer" and context.get("score"):
             try:
-                structured = query_admission(
-                    self.db_conn, context["province"], 2025,
-                    context.get("category", "physics"),
-                    context["score"] - 30, context["score"] + 30,
-                )
-                fused.extend(structured)
+                province = context.get("province", "")
+                category = context.get("subject_combo", "综合")
+                score = context["score"]
+                year = context.get("year", 2025)
+
+                if province:
+                    structured = query_admission(
+                        self.db_conn, province, year,
+                        category, score - 30, score + 30,
+                    )
+                    # Fuse structured results into RRF instead of appending
+                    if structured:
+                        fused = rrf_fusion(fused, structured)
             except Exception:
                 pass
 
@@ -127,4 +134,42 @@ class HybridSearch:
                 if self.logger:
                     self.logger.log_warning("reranker", "rerank_failed", "use_original", {"error": str(e)})
 
+        # Boost score_data results when query contains rank/score keywords
+        if fused and _is_score_query(query):
+            fused = _boost_score_data(fused)
+
         return fused[:10]
+
+
+# -- Query classification helpers --
+
+_SCORE_QUERY_PATTERNS = [
+    '一分一段', '位次', '批次线', '录取分', '分数线', '投档线',
+    '特招线', '本科线', '专科线', '一分一段表', '排名', '多少分',
+    '几分', '估分', '分数', '省控线', '调档线', '分能上', '分左右',
+    '分可以', '分够', '分报',
+]
+
+
+def _is_score_query(query: str) -> bool:
+    """Check if query is asking about score/rank/batch-line data."""
+    return any(p in query for p in _SCORE_QUERY_PATTERNS)
+
+
+def _boost_score_data(results: list[dict], boost: float = 0.15) -> list[dict]:
+    """Boost score_data results by adding *boost* to an implicit RRF-like score.
+
+    Since items from RRF don't carry individual scores accessible here,
+    we re-rank by pushing score_data items toward the front while
+    preserving their relative order with other score_data items.
+    """
+    score_data_items = []
+    other_items = []
+    for item in results:
+        meta = item.get('metadata', {}) or {}
+        if meta.get('content_type') == 'score_data':
+            score_data_items.append(item)
+        else:
+            other_items.append(item)
+    # score_data first, then others — both preserving original order
+    return score_data_items + other_items
