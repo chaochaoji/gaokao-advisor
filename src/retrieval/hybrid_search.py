@@ -1,19 +1,26 @@
-"""Hybrid search -- combine vector, keyword, and structured results.
+"""Hybrid search -- combine BM25, vector, keyword, and structured results.
 
 Core algorithm:
     RRF (Reciprocal Rank Fusion) merges multiple ranked lists into one
     without needing calibrated scores.  Each document receives:
         score = sum(1 / (k + rank + 1)) across every list that contains it.
 
+Search branches:
+    1. BM25 keyword (primary — exact province/score/rank matching)
+    2. Vector similarity (semantic fallback for natural-language queries)
+    3. SQLite FTS5 (full-text search on corpus)
+    4. Structured queries (admission/employment/city data for volunteer scene)
+
 Provides:
     :func:`rrf_fusion` -- merge helper
-    :class:`HybridSearch` -- orchestrator that calls the three retrieval
+    :class:`HybridSearch` -- orchestrator that calls four retrieval
     branches, fuses results, and optionally re-ranks.
 """
 
 from __future__ import annotations
 
 from typing import Optional
+
 
 # RRF Fusion
 # ------------------------------------------------------------------
@@ -51,7 +58,7 @@ def rrf_fusion(*result_lists: list[dict], k: int = 60) -> list[dict]:
 class HybridSearch:
     """Orchestrate multi-strategy retrieval with RRF fusion.
 
-    Wraps vector, keyword, and structured queries into a single
+    Wraps BM25, vector, keyword, and structured queries into a single
     ``search()`` call.  On any branch failure, that branch is
     skipped gracefully (logged if a logger is available).
 
@@ -66,6 +73,8 @@ class HybridSearch:
         A chromadb-compatible collection.
     db_conn : sqlite3.Connection
         SQLite connection for keyword + structured queries.
+    bm25_index :
+        Optional :class:`~src.retrieval.bm25_search.BM25Index` instance.
     reranker :
         Optional :class:`~src.retrieval.reranker.RerankerService` instance.
     logger :
@@ -73,33 +82,56 @@ class HybridSearch:
     """
 
     def __init__(self, mode="prod", embedding_svc=None, chroma_col=None,
-                 db_conn=None, reranker=None, logger=None):
+                 db_conn=None, bm25_index=None, reranker=None, logger=None):
         self.mode = mode
         self.embedding_svc = embedding_svc
         self.chroma_col = chroma_col
         self.db_conn = db_conn
+        self.bm25_index = bm25_index
         self.reranker = reranker
         self.logger = logger
 
     def search(self, query, scene, context=None):
+        """Run all retrieval branches and fuse with RRF.
+
+        Returns the top 10 results after fusion and optional re-ranking.
+        """
         if self.mode == "mock":
             return []
 
         from src.retrieval.vector_search import vector_search
         from src.retrieval.keyword_search import keyword_search
+        from src.retrieval.bm25_search import bm25_search
         from src.retrieval.structured_query import (
             query_admission, query_employment, query_city_clusters,
         )
 
         context = context or {}
+        chroma_docs = self.chroma_col._documents if self.chroma_col else []
 
+        # Branch 1: BM25 keyword (primary — exact matching)
         try:
-            vec_results = vector_search(self.embedding_svc, self.chroma_col, query, top_k=20)
+            bm25_results = bm25_search(
+                self.bm25_index, chroma_docs, query, top_k=15,
+                metadatas=(self.chroma_col._metadatas if self.chroma_col else None),
+                ids=(self.chroma_col._ids if self.chroma_col else None),
+            )
+        except Exception as e:
+            if self.logger:
+                self.logger.log_warning("bm25", "search_failed", "skip_bm25", {"error": str(e)})
+            bm25_results = []
+
+        # Branch 2: Vector similarity (semantic fallback)
+        try:
+            vec_results = vector_search(
+                self.embedding_svc, self.chroma_col, query, top_k=15,
+            )
         except Exception as e:
             if self.logger:
                 self.logger.log_warning("chromadb", "vector_search_failed", "skip_vector", {"error": str(e)})
             vec_results = []
 
+        # Branch 3: SQLite FTS5 full-text search
         try:
             kw_results = keyword_search(self.db_conn, query, top_k=10)
         except Exception as e:
@@ -107,8 +139,35 @@ class HybridSearch:
                 self.logger.log_warning("sqlite", "keyword_search_failed", "skip_keyword", {"error": str(e)})
             kw_results = []
 
-        fused = rrf_fusion(vec_results, kw_results)
+        # Fuse BM25 + vector + FTS5
+        # BM25 carries the strongest signal for Chinese keyword queries —
+        # it appears first in RRF so its ranks dominate when there's consensus.
+        # BM25 2x weight: it carries the strongest signal for Chinese keyword
+        # queries (exact province/score matching). Without doubling, rank-2 BM25
+        # (1/63) can lose to rank-1 vector (1/62) after RRF fusion.
+        fused = rrf_fusion(bm25_results, bm25_results, vec_results, kw_results)
 
+        # Safety net: when the fused top-5 has no score_data, inject province-
+        # matched score_data docs directly.  BM25 bigram tokenization can miss
+        # numeric matches ("598" vs "598分"), so this guarantees the LLM always
+        # sees relevant 2025 data.
+        _top5_cts = [
+            (r.get('metadata', {}) or {}).get('content_type', '')
+            for r in fused[:5]
+        ]
+        if 'score_data' not in _top5_cts:
+            injected = _find_score_data_for_context(self.chroma_col, query, context, max_results=5)
+            if injected:
+                # Prepend injected docs, dedup by content prefix
+                seen = {_dedup_key(r) for r in fused}
+                for inj in injected:
+                    if _dedup_key(inj) not in seen:
+                        fused.insert(0, inj)
+                        seen.add(_dedup_key(inj))
+                # Trim to 25 max before re-ranker
+                fused = fused[:25]
+
+        # Branch 4: Structured SQL queries (volunteer scene only)
         if scene == "volunteer" and context.get("score"):
             try:
                 province = context.get("province", "")
@@ -121,18 +180,12 @@ class HybridSearch:
                         self.db_conn, province, year,
                         category, score - 30, score + 30,
                     )
-                    # Fuse structured results into RRF instead of appending
                     if structured:
                         fused = rrf_fusion(fused, structured)
             except Exception:
                 pass
 
-        # Inject province-matched score_data chunks when query asks for rank/score data.
-        # Vector similarity alone is too weak to surface structured tables; explicit
-        # province-keyword injection ensures the LLM sees relevant 2025 data.
-        if fused and _is_score_query(query):
-            fused = _inject_province_score_data(fused, self.chroma_col, query, context)
-
+        # Optional re-ranking
         if self.reranker and fused:
             try:
                 fused = self.reranker.rerank(query, fused)
@@ -140,136 +193,64 @@ class HybridSearch:
                 if self.logger:
                     self.logger.log_warning("reranker", "rerank_failed", "use_original", {"error": str(e)})
 
-        # Boost score_data results when query contains rank/score keywords
-        if fused and _is_score_query(query):
-            fused = _boost_score_data(fused)
-
         return fused[:10]
 
 
-# -- Query classification helpers --
+# -- Safety-net injection helpers -----------------------------------------
 
-_SCORE_QUERY_PATTERNS = [
-    '一分一段', '位次', '批次线', '录取分', '分数线', '投档线',
-    '特招线', '本科线', '专科线', '一分一段表', '排名', '多少分',
-    '几分', '估分', '分数', '省控线', '调档线', '分能上', '分左右',
-    '分可以', '分够', '分报',
-]
-
-# Province name list for keyword injection
-_PROVINCE_NAMES = [
-    '北京', '天津', '上海', '重庆', '广东', '江苏', '浙江', '山东',
-    '河南', '河北', '湖北', '湖南', '福建', '安徽', '江西', '辽宁',
-    '四川', '陕西', '山西', '云南', '贵州', '广西', '甘肃', '吉林',
-    '黑龙江', '内蒙古', '新疆', '海南', '宁夏', '青海', '西藏',
-]
+_SCORE_DATA_SCAN_LIMIT = 60000
 
 
-def _is_score_query(query: str) -> bool:
-    """Check if query is asking about score/rank/batch-line data."""
-    return any(p in query for p in _SCORE_QUERY_PATTERNS)
+def _dedup_key(item: dict) -> str:
+    """Generate a deduplication key from a search result item."""
+    content = item.get('content', '') or ''
+    return content[:80].strip()
 
 
-def _boost_score_data(results: list[dict], boost: float = 0.15) -> list[dict]:
-    """Boost score_data results by adding *boost* to an implicit RRF-like score.
-
-    Since items from RRF don't carry individual scores accessible here,
-    we re-rank by pushing score_data items toward the front while
-    preserving their relative order with other score_data items.
-    """
-    score_data_items = []
-    other_items = []
-    for item in results:
-        meta = item.get('metadata', {}) or {}
-        if meta.get('content_type') == 'score_data':
-            score_data_items.append(item)
-        else:
-            other_items.append(item)
-    # score_data first, then others — both preserving original order
-    return score_data_items + other_items
-
-
-def _find_province(query: str, context: dict) -> str:
-    """Extract province name from query or context."""
-    # Check context first
-    province = context.get('province', '')
-    if province and province in _PROVINCE_NAMES:
-        return province
-    # Check query
-    for p in _PROVINCE_NAMES:
-        if p in query:
-            return p
-    return ''
-
-
-def _inject_province_score_data(
-    results: list[dict],
-    chroma_col,
-    query: str,
-    context: dict,
-    max_inject: int = 5,
+def _find_score_data_for_context(
+    chroma_col, query: str, context: dict, max_results: int = 5,
 ) -> list[dict]:
-    """Inject province-matched score_data chunks at the front of results.
+    """Find score_data docs relevant to the user's province.
 
-    Vector search alone can't reliably surface structured score tables
-    (character-bigram hashing doesn't capture "598分" vs "分数位次院校"
-    semantic similarity).  This function directly finds score_data docs
-    for the target province and prepends them.
+    Used as a safety net when BM25+vector fusion fails to surface any
+    score_data in the top results. Scans ChromaDB in-memory (~5ms for
+    60k docs, no I/O).
     """
-    province = _find_province(query, context)
+    province = context.get('province', '')
     if not province:
-        return results
+        for p in ['北京', '天津', '上海', '广东', '江苏', '浙江', '山东',
+                   '河南', '河北', '湖北', '湖南', '福建', '安徽', '江西',
+                   '辽宁', '四川', '陕西', '山西', '云南', '贵州', '广西',
+                   '甘肃', '吉林', '黑龙江', '内蒙古', '新疆', '海南', '宁夏',
+                   '青海', '西藏', '重庆']:
+            if p in query:
+                province = p
+                break
+    if not province:
+        return []
 
-    # Scan ChromaDB for province-matched score_data docs
-    injected = []
-    seen_ids = {r.get('id', '') for r in results}
-    # Limit scan to first 60k docs for performance
-    for i in range(min(len(chroma_col._documents), 60000)):
+    results = []
+    limit = min(len(chroma_col._documents), _SCORE_DATA_SCAN_LIMIT)
+    for i in range(limit):
         meta = chroma_col._metadatas[i] if i < len(chroma_col._metadatas) else {}
         if not isinstance(meta, dict):
             continue
         if meta.get('content_type') != 'score_data':
             continue
-        doc_text = chroma_col._documents[i] if i < len(chroma_col._documents) else ''
-        if province not in doc_text:
+        doc = chroma_col._documents[i] if i < len(chroma_col._documents) else ''
+        if province not in doc:
             continue
-        doc_id = chroma_col._ids[i] if i < len(chroma_col._ids) else ''
-        if doc_id in seen_ids:
-            continue
-        injected.append({
-            'id': doc_id,
-            'content': doc_text,
+        priority = 0 if ('一分一段' in doc[:300] or '分数位次对照' in doc[:300]) else 1
+        results.append({
+            'id': chroma_col._ids[i] if i < len(chroma_col._ids) else str(i),
+            'content': doc,
             'metadata': meta,
+            '_priority': priority,
         })
-        seen_ids.add(doc_id)
-        if len(injected) >= max_inject:
+        if len(results) >= max_results * 2:
             break
 
-    if not injected:
-        return results
-
-    # Sort: 一分一段表 docs first, then province-header docs, then others
-    def _sort_key(r):
-        content = r.get('content', '') or ''
-        # Priority 0: explicit 一分一段表 or 分数位次对照
-        if '一分一段' in content[:300] or '分数位次对照' in content[:300]:
-            return 0
-        # Priority 1: province in header
-        if province in content[:200]:
-            return 1
-        return 2
-    injected.sort(key=_sort_key)
-
-    # Prepend injected score_data, then deduplicated original results
-    return injected + results
-
-
-def _inject_batch_line_data(
-    results: list[dict],
-    chroma_col,
-    query: str,
-    context: dict,
-) -> list[dict]:
-    """Inject general batch-line data when province not found."""
-    # Already covered by _inject_province_score_data for most cases
-    return results
+    results.sort(key=lambda r: r.get('_priority', 1))
+    for r in results:
+        r.pop('_priority', None)
+    return results[:max_results]

@@ -63,11 +63,17 @@ reranker = RerankerService(
 )
 logger.log_info('reranker', 'service_initialized', {'mode': config.reranker_mode})
 
+from src.retrieval.bm25_search import BM25Index
+_bm25_t0 = time.time()
+bm25_index = BM25Index(chroma_col._documents)
+logger.log_info('bm25', 'index_built', {'docs': bm25_index.doc_count, 'vocab': bm25_index.vocab_size, 'build_ms': int((time.time()-_bm25_t0)*1000)})
+
 hybrid_search = HybridSearch(
     mode='prod',
     embedding_svc=embedding_svc,
     chroma_col=chroma_col,
     db_conn=db,
+    bm25_index=bm25_index,
     reranker=reranker,
     logger=logger,
 )
@@ -271,34 +277,53 @@ def chat_fn(message, history):
 # ============================================================================
 
 
-def volunteer_form_fn(province, score, category, interests):
+def volunteer_form_fn(province, score, category, interests, rank=0, desired_location=""):
     # Take structured form input and run the volunteer assessment pipeline.
     if not province or not score:
         yield "请至少填写省份和分数。"
         return
 
-    query = f"{province}{category}{score}分 志愿填报推荐"
+    # Build search query — include desired province if specified
+    query = f"{province}{category}{score}分"
+    if rank:
+        query += f" 位次{rank}"
+    query += " 志愿填报推荐"
     if interests:
         query += f" 对{interests}感兴趣"
+    if desired_location:
+        query += f" 期望地区{desired_location}"
 
     # Build context from form fields
     context = {
         "province": province,
         "score": score,
+        "rank": rank,
         "category": category or "物理类",
         "interests": [i.strip() for i in interests.split(",") if i.strip()],
+        "desired_location": desired_location,
     }
 
     # Search
     search_results = hybrid_search.search(query, "volunteer", context)
 
-    # Build prompt and call LLM
+    # Build prompt and call LLM (use volunteer_form for comprehensive assessment)
     from src.utils.prompt_templates import build_prompt
-    prompt = build_prompt("volunteer", context)
+    prompt = build_prompt("volunteer_form", context)
     context_str = "\n".join(
-        [f"[检索结果 {i+1}] {r['content']}" for i, r in enumerate(search_results[:8])]
+        [f"[检索结果 {i+1}] {r['content']}" for i, r in enumerate(search_results[:10])]
     )
-    full_prompt = f"{prompt}\n\n## 检索到的相关信息\n{context_str}\n\n## 用户问题\n{query}"
+    user_info_lines = [f"省份: {province}, 科类: {category}, 分数: {score}"]
+    if rank:
+        user_info_lines.append(f"位次: {rank}")
+    if interests:
+        user_info_lines.append(f"意向专业: {interests}")
+    if desired_location:
+        user_info_lines.append(f"期望省份/城市: {desired_location}（优先推荐该地区的院校，但也可推荐全国范围内更优的选择）")
+    else:
+        user_info_lines.append("期望省份/城市: 未指定（请在全国范围内推荐，不限地区）")
+    user_info_str = "\n".join(user_info_lines)
+
+    full_prompt = f"{prompt}\n\n## 检索到的数据\n{context_str}\n\n## 用户信息\n{user_info_str}\n\n请输出完整的志愿评估报告。如用户指定了期望地区，优先推荐该地区院校；如未指定，基于全国范围推荐最优选择。"
 
     response_text = call_llm_sync(full_prompt)
 
@@ -452,9 +477,9 @@ def create_ui():
         '.health-ok { color: #22c55e; } '
         '.health-warn { color: #eab308; }'
     )
-    with gr.Blocks(title='张雪峰知识蒸馏 Agent', css='.health-ok { color: #22c55e; } .health-warn { color: #eab308; }') as demo:
-        gr.Markdown('# 张雪峰知识蒸馏 Agent')
-        gr.Markdown('基于张雪峰老师公开言论与教育数据构建的 AI 教育规划助手。')
+    with gr.Blocks(title='高考志愿AI助手', css='.health-ok { color: #22c55e; } .health-warn { color: #eab308; }') as demo:
+        gr.Markdown('# 高考志愿AI助手')
+        gr.Markdown('基于高考志愿填报专家公开言论与教育数据构建的 AI 教育规划助手。')
         with gr.Accordion('系统状态', open=False):
             health_md = gr.Markdown(value=get_health_markdown(), every=30)
         with gr.Tabs():
@@ -484,8 +509,8 @@ def create_ui():
                 vf_clear.click(lambda: ('北京',600,'物理类','',''), None, [vf_province, vf_score, vf_category, vf_interests, vf_output])
             # Tab 3: 语录搜索
             with gr.TabItem('语录搜索'):
-                gr.Markdown('### 张雪峰语录搜索')
-                gr.Markdown('搜索张雪峰老师在直播、演讲、文章中的相关语录。')
+                gr.Markdown('### 高考志愿语录搜索')
+                gr.Markdown('搜索高考志愿专家在直播、演讲、文章中的相关语录。')
                 with gr.Row():
                     qs_query = gr.Textbox(label='搜索关键词', placeholder='输入关键词...', scale=4)
                     qs_top_k = gr.Slider(minimum=1, maximum=20, value=5, step=1, label='返回条数')
