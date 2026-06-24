@@ -104,7 +104,7 @@ python scripts/ocr_scanned_pdfs.py
 python scripts/_reindex_2025.py
 ```
 
-**注意：** 数据文件（`data/` 目录下的 ChromaDB pickle、SQLite、extracted 文本）不入 git 仓库，需要本地自行采集。
+**注意：** 数据文件（`data/` 目录下的 ChromaDB pickle、SQLite、extracted 文本）不入 git 仓库，需要本地自行采集。采集脚本仅用于获取政府公开的高考教育数据，使用时应遵守目标网站的 robots.txt 并控制请求频率。
 
 ## 项目结构
 
