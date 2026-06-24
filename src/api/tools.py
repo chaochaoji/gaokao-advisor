@@ -207,13 +207,13 @@ def volunteer_tool(data: VolunteerInput):
     else:
         user_info_lines.append("期望地区: 未指定（全国范围推荐）")
 
-    # Extract 一分一段表 precision rank data
+    # Extract 一分一段表 precision rank data and force it into user info
     rank_hint = _extract_rank_from_results(results, data.score, data.province)
     if rank_hint:
-        # Force the exact rank into user_info so it's impossible to miss
-        rank_val = _parse_rank_from_hint(rank_hint)
-        if rank_val:
-            user_info_lines.insert(0, f"【精确位次】{data.score}分 → {rank_val}名（已从一分一段表查证，直接引用，禁止估算）")
+        # Insert exact rank as first user_info line — impossible to miss
+        exact_rank = _parse_rank_from_hint(rank_hint)
+        if exact_rank and exact_rank > 100:
+            user_info_lines.insert(0, f"【精确位次（已从一分一段表查证，直接引用，严禁估算）】{data.score}分 → {exact_rank}名")
 
     full_prompt = (
         f"{prompt}{nl}{nl}"
