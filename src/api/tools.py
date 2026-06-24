@@ -27,12 +27,11 @@ def _validate_and_parse_volunteer_json(raw_text: str, user_ctx: dict) -> dict:
 
     # Strip markdown code block fences
     if text.startswith("```"):
-        lines = text.split("\n")
-        if lines[-1].strip() == "```":
-            lines = lines[1:-1]
+        if text.rstrip().endswith("```"):
+            text = text.rstrip()[:-3].strip()
         else:
-            lines = lines[1:]
-        text = "\n".join(lines)
+            lines = text.split("\n")[1:]
+            text = "\n".join(lines)
 
     try:
         parsed = json.loads(text)
@@ -57,27 +56,20 @@ def _validate_and_parse_volunteer_json(raw_text: str, user_ctx: dict) -> dict:
                 break
         if valid and parsed.get("schools"):
             for s in parsed["schools"]:
-                s["tier"] = s.get("tier", "稳妥")
+                _DEFAULTS = {str: "", list: [], int: 0}
+                for field, ftype in _REQUIRED_SCHOOL_FIELDS.items():
+                    if field not in s or not isinstance(s.get(field), ftype):
+                        s[field] = _DEFAULTS[ftype]
+                # tier 特殊校验
                 if s["tier"] not in _VALID_TIERS:
                     s["tier"] = "稳妥"
-                # 确保整数类型
-                if not isinstance(s.get("min_score"), int):
-                    try:
-                        s["min_score"] = int(s["min_score"])
-                    except (ValueError, TypeError):
-                        s["min_score"] = 0
-                if not isinstance(s.get("min_rank"), int):
-                    try:
-                        s["min_rank"] = int(s["min_rank"])
-                    except (ValueError, TypeError):
-                        s["min_rank"] = 0
         if valid and len(parsed.get("schools", [])) > 0:
             return {"ok": True, "data": parsed}
 
     # Fallback: regex extraction of school list
     schools_raw = re.findall(
         r'(?:推荐|报考).*?(\S{2,8}(?:大学|学院)).*?(\d{3})\s*分.*?(\d{3,7})\s*(?:名|位)',
-        text
+        text, re.DOTALL
     )
     if schools_raw:
         schools = []
@@ -111,6 +103,45 @@ router = APIRouter(tags=["tools"])
 
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 SETTINGS_FILE = os.path.join(_PROJECT_ROOT, ".env")
+
+def _extract_rank_from_results(results: list, user_score: int, province: str) -> str:
+    """Find 一分一段表 data in search results and extract the exact rank.
+
+    Returns a formatted string to prepend to the LLM prompt, instructing it
+    to use the exact rank value.  Returns empty string if no rank found.
+    """
+    import re
+    for r in results:
+        content = r.get('content', '') or ''
+        # Look for 一分一段表 in the first 300 chars (likely a header)
+        if '一分一段' not in content[:300]:
+            continue
+        if province not in content:
+            continue
+        # Try to find the user's exact score in the table
+        score_str = str(user_score)
+        for line in content.split('\n'):
+            if score_str not in line:
+                continue
+            # Extract rank: patterns like "| 598 | 10,984 |" or "598分 → 10,984名"
+            rank_match = re.search(r'[\|\s](\d{1,3}[,\d]*)\s*[\|\→]', line)
+            if not rank_match:
+                rank_match = re.search(r'(\d{1,3}[,\d]+)\s*(?:名|位)', line)
+            if rank_match:
+                rank_str = rank_match.group(1).replace(',', '')
+                try:
+                    rank_val = int(rank_str)
+                    return (
+                        "\n【必须使用以下精确数据】\n"
+                        f"在检索数据中找到了 {province} 的一分一段表。"
+                        f"用户 {user_score} 分对应的精确位次是 {rank_str} 名。"
+                        f"请在 summary.position 和 summary.rank 中直接使用这个值。"
+                        f"禁止用批次线反推。\n\n"
+                    )
+                except ValueError:
+                    pass
+    return ''
+
 
 class VolunteerInput(BaseModel):
     province: str = "北京"; score: int = 600; rank: int = 0
@@ -149,10 +180,22 @@ def volunteer_tool(data: VolunteerInput):
     else:
         user_info_lines.append("期望地区: 未指定（全国范围推荐）")
 
-    full_prompt = f"{prompt}{nl}{nl}## 检索到的数据{nl}{ctx}{nl}{nl}## 用户信息{nl}{nl.join(user_info_lines)}{nl}{nl}请按 JSON 格式输出完整的志愿评估报告。切记只输出 JSON，不要包含任何其他文本。"
+    # Extract 一分一段表 precision rank data and put it front-and-center
+    rank_hint = _extract_rank_from_results(results, data.score, data.province)
+
+    full_prompt = (
+        f"{prompt}{nl}{nl}"
+        f"{rank_hint}"
+        f"## 检索到的数据{nl}{ctx}{nl}{nl}"
+        f"## 用户信息{nl}{nl.join(user_info_lines)}{nl}{nl}"
+        f"请按 JSON 格式输出完整的志愿评估报告。切记只输出 JSON，不要包含任何其他文本。"
+    )
 
     from src.api.chat import _call_llm
-    resp = _call_llm(full_prompt)
+    try:
+        resp = _call_llm(full_prompt)
+    except Exception:
+        return {"error": "LLM 调用失败，请稍后重试", "ok": False}
 
     # 校验 + fallback
     user_ctx = {"score": data.score, "rank": data.rank, "province": data.province}
