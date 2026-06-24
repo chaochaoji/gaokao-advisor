@@ -38,17 +38,9 @@ logger.log_info("embedding", "service_initialized", {"mode": embedding_svc.mode,
 reranker = RerankerService(mode=config.reranker_mode, model=config.reranker_model)
 logger.log_info("reranker", "service_initialized", {"mode": config.reranker_mode})
 
-# BM25 keyword index (built at startup from ChromaDB documents)
-from src.retrieval.bm25_search import BM25Index
-import time as _time
-_t0 = _time.time()
-bm25_index = BM25Index(chroma_col._documents)
-bm25_build_ms = int((_time.time() - _t0) * 1000)
-logger.log_info("bm25", "index_built", {"docs": bm25_index.doc_count, "vocab": bm25_index.vocab_size, "build_ms": bm25_build_ms})
-
 hybrid_search = HybridSearch(
     mode="prod", embedding_svc=embedding_svc, chroma_col=chroma_col,
-    db_conn=db, bm25_index=bm25_index, reranker=reranker, logger=logger)
+    db_conn=db, reranker=reranker, logger=logger)
 logger.log_info("hybrid_search", "service_initialized")
 
 safety = InputSafetyGateway()

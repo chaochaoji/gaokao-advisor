@@ -1,14 +1,7 @@
-"""Structured (SQL) query module for the evidence layer.
-
-Provides domain-specific query functions that join the normalized
-tables (universities, admission_scores, majors, employment_trends,
-city_industries, major_selection_requirements) and return dict lists
-suitable for downstream consumers.
-"""
+"""Structured (SQL) query module — queries FTS5 corpus for score/position data."""
 
 from __future__ import annotations
-
-import sqlite3
+import sqlite3, re
 
 
 def query_admission(
@@ -19,123 +12,95 @@ def query_admission(
     min_score: int,
     max_score: int | None = None,
 ) -> list[dict]:
-    """Look up admission scores within a score band.
+    """Search FTS5 corpus for admission score-position-university data.
 
-    Parameters
-    ----------
-    db_conn : sqlite3.Connection
-        Open SQLite connection.
-    province : str
-        Target province (e.g. ``"浙江"``).
-    year : int
-        Admission year (e.g. 2024).
-    category : str
-        Exam category (e.g. ``"物理类"``, ``"历史类"``).
-    min_score : int
-        Lower bound (inclusive) of the score band.
-    max_score : int or None
-        Upper bound (inclusive).  Defaults to *min_score* + 50 when
-        omitted.
-
-    Returns
-    -------
-    list[dict]
-        Rows with keys: ``university``, plus all columns from
-        ``admission_scores`` (``id``, ``university_id``, ``province``,
-        ``year``, ``category``, ``selection_combo``, ``batch``,
-        ``min_score``, ``min_rank``, ``major``, ``source``, ``updated_at``).
+    Looks in corpus_fts for chunks matching the province + score range.
     """
     if max_score is None:
         max_score = min_score + 50
 
-    cursor = db_conn.execute(
-        """SELECT u.name AS university, a.*
-           FROM admission_scores a
-           JOIN universities u ON a.university_id = u.id
-           WHERE a.province = ? AND a.year = ? AND a.category = ?
-             AND a.min_score BETWEEN ? AND ?
-           ORDER BY a.min_score DESC""",
-        (province, year, category, min_score, max_score),
-    )
-    return [dict(row) for row in cursor.fetchall()]
+    # category mapping: normalize user input
+    cat_map = {
+        "物理": "物理", "物理类": "物理", "physics": "物理",
+        "历史": "历史", "历史类": "历史", "history": "历史",
+        "综合": "综合", "comprehensive": "综合",
+    }
+    cat = cat_map.get(category, category)
+
+    results = []
+    try:
+        # Search FTS5 for province + year hints
+        cursor = db_conn.execute(
+            "SELECT content, source, rowid FROM corpus_fts "
+            "WHERE (source LIKE ? OR content LIKE ?) AND content_type = 'score_data' "
+            "ORDER BY rowid ASC LIMIT 100",
+            (f"%{province}%", f"%{province}%")
+        )
+        rows = cursor.fetchall()
+        if not rows:
+            # Fallback: search broader
+            cursor = db_conn.execute(
+                "SELECT content, source, rowid FROM corpus_fts "
+                "WHERE (content LIKE ? OR content LIKE ?) ORDER BY rowid ASC LIMIT 50",
+                (f"%{province}%{year}%", f"%{province}%")
+            )
+            rows = cursor.fetchall()
+
+        for content, source, rowid in rows:
+            # Filter: look for score-position lines matching the range
+            lines = content.split('\n')
+            matched = []
+            for line in lines:
+                # Match lines like "580分 | 位次12000 | 太原理工大学"
+                m = re.search(r'(\d{3})\s*分\s*[|｜]\s*位次\s*(\d{3,7})\s*[|｜]\s*(.+)', line)
+                if m:
+                    score = int(m.group(1))
+                    if min_score <= score <= max_score:
+                        matched.append(line.strip())
+            if matched:
+                results.append({
+                    "content": f"[{province} {year}年 {cat}] 分数区间 {min_score}-{max_score}:\n" + "\n".join(matched[:20]),
+                    "source": f"{source}",
+                    "content_type": "score_data",
+                })
+    except Exception:
+        pass
+
+    return results
 
 
 def query_employment(db_conn: sqlite3.Connection, major: str) -> list[dict]:
-    """Query employment trends for a major (fuzzy match).
-
-    Parameters
-    ----------
-    db_conn : sqlite3.Connection
-        Open SQLite connection.
-    major : str
-        Major name or partial name (``LIKE %major%``).
-
-    Returns
-    -------
-    list[dict]
-        Matching rows from ``employment_trends``.
-    """
-    cursor = db_conn.execute(
-        "SELECT * FROM employment_trends WHERE major LIKE ?",
-        (f"%{major}%",),
-    )
-    return [dict(row) for row in cursor.fetchall()]
+    """Search FTS5 corpus for employment/major prospect data."""
+    try:
+        cursor = db_conn.execute(
+            "SELECT content, source FROM corpus_fts WHERE content LIKE ? LIMIT 10",
+            (f"%{major}%",)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        return []
 
 
-def query_city_clusters(
-    db_conn: sqlite3.Connection, city_or_cluster: str
-) -> list[dict]:
-    """Query city-industry clusters for a city or cluster name.
-
-    Parameters
-    ----------
-    db_conn : sqlite3.Connection
-        Open SQLite connection.
-    city_or_cluster : str
-        City name or industry cluster keyword (``LIKE`` on both columns).
-
-    Returns
-    -------
-    list[dict]
-        Matching rows from ``city_industries``.
-    """
-    cursor = db_conn.execute(
-        "SELECT * FROM city_industries WHERE city LIKE ? OR cluster LIKE ?",
-        (f"%{city_or_cluster}%", f"%{city_or_cluster}%"),
-    )
-    return [dict(row) for row in cursor.fetchall()]
+def query_city_clusters(db_conn: sqlite3.Connection, city_or_cluster: str) -> list[dict]:
+    """Search FTS5 corpus for city/industry cluster data."""
+    try:
+        cursor = db_conn.execute(
+            "SELECT content, source FROM corpus_fts WHERE content LIKE ? LIMIT 10",
+            (f"%{city_or_cluster}%",)
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        return []
 
 
-def query_major_requirements(
-    db_conn: sqlite3.Connection,
-    major_name: str,
-    province: str,
-    year: int,
-) -> list[dict]:
-    """Query subject-selection requirements for a major in a province/year.
-
-    Parameters
-    ----------
-    db_conn : sqlite3.Connection
-        Open SQLite connection.
-    major_name : str
-        Major name or partial name (``LIKE %major_name%``).
-    province : str
-        Target province.
-    year : int
-        Target year.
-
-    Returns
-    -------
-    list[dict]
-        Rows with keys: all columns from ``major_selection_requirements``
-        plus ``major_name`` from the ``majors`` table.
-    """
-    cursor = db_conn.execute(
-        """SELECT mr.*, m.name AS major_name
-           FROM major_selection_requirements mr
-           JOIN majors m ON mr.major_id = m.id
-           WHERE m.name LIKE ? AND mr.province = ? AND mr.year = ?""",
-        (f"%{major_name}%", province, year),
-    )
-    return [dict(row) for row in cursor.fetchall()]
+def query_major_requirements(db_conn, major_name, province, year):
+    """Search FTS5 corpus for major selection requirements."""
+    try:
+        cursor = db_conn.execute(
+            "SELECT content, source FROM corpus_fts "
+            "WHERE (content LIKE ? AND content LIKE ?) LIMIT 10",
+            (f"%{major_name}%", f"%{province}%")
+        )
+        return [dict(row) for row in cursor.fetchall()]
+    except Exception:
+        return []

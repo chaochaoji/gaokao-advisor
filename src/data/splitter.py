@@ -2,7 +2,7 @@ import re
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 
-class ZhangXuefengTextSplitter:
+class GaokaoTextSplitter:
     STRATEGIES = {
         "live_transcript": {
             "primary_separator": r"\n?(?:问|家长|同学)[：:]",

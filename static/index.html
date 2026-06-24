@@ -3,42 +3,152 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>张雪峰知识助手</title>
+<title>高考志愿AI助手</title>
 <script src="https://cdn.tailwindcss.com"></script>
 <script>tailwind.config={theme:{extend:{colors:{brand:{50:"#eff6ff",500:"#3b82f6",600:"#2563eb",700:"#1d4ed8"}}}}}</script>
+<!-- 国内CDN不可用时，回退到bootcdn -->
+<script>setTimeout(function(){var e=document.body;if(!e||e.offsetHeight<10){var l=document.createElement("link");l.rel="stylesheet";l.href="https://cdn.bootcdn.net/ajax/libs/tailwindcss/2.2.19/tailwind.min.css";document.head.appendChild(l)}},3000)</script>
 <link rel="stylesheet" href="/static/css/style.css">
 </head>
-<body class="h-full bg-white">
+<body class="h-full bg-white overflow-hidden">
 <div id="app" class="flex h-full overflow-hidden">
-<aside id="sidebar" class="flex flex-col w-72 bg-slate-900 text-white shrink-0 transition-all duration-300 overflow-hidden">
-<div class="flex items-center justify-between px-4 py-4 border-b border-slate-700/50">
-<span class="text-lg font-bold tracking-wide bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent">张雪峰老师</span>
-<button id="collapse-btn" class="text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-slate-800">
-<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
-</button></div>
-<div class="px-3 pt-3 pb-2"><input id="search-input" type="text" placeholder="搜索对话..." class="w-full px-4 py-2 text-sm bg-slate-800 border border-slate-700 rounded-full text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent transition-all"></div>
-<button id="new-session" class="mx-3 mb-3 px-4 py-2.5 text-sm border border-slate-600/50 rounded-full text-slate-300 hover:bg-slate-800 hover:text-white hover:border-slate-500 transition-all text-left">+ 新对话</button>
-<div id="session-list" class="flex-1 overflow-y-auto px-2 py-1 space-y-0.5"></div>
+
+<!-- ====== Sidebar ====== -->
+<aside id="sidebar" class="sidebar flex flex-col bg-slate-900 text-white shrink-0 transition-all duration-300 overflow-hidden">
+  <div class="sidebar-header flex items-center px-3 py-3 border-b border-slate-700/50 gap-2.5 min-h-[52px]">
+    <div id="sidebar-logo" class="sidebar-logo shrink-0 w-9 h-9 rounded-full bg-gradient-to-br from-blue-500 to-cyan-400 flex items-center justify-center text-sm font-extrabold text-white shadow-lg shadow-blue-500/25">考</div>
+    <span id="sidebar-title" class="sidebar-title text-base font-bold whitespace-nowrap bg-gradient-to-r from-blue-400 to-cyan-300 bg-clip-text text-transparent overflow-hidden">高考志愿助手</span>
+    <button id="collapse-btn" class="sidebar-collapse-btn shrink-0 ml-auto text-slate-400 hover:text-white transition-colors p-1.5 rounded-lg hover:bg-slate-800">
+      <svg class="w-5 h-5 transition-transform duration-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 19l-7-7 7-7m8 14l-7-7 7-7"/></svg>
+    </button>
+  </div>
+  <div id="sidebar-content" class="sidebar-content flex flex-col flex-1 min-h-0">
+    <div class="px-3 pt-3 pb-2"><input id="search-input" type="text" placeholder="搜索对话..." class="w-full px-4 py-2 text-sm bg-slate-800 border border-slate-700 rounded-full text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/50 focus:border-transparent transition-all"></div>
+    <div id="session-list" class="flex-1 overflow-y-auto px-2 py-1 space-y-0.5"></div>
+  </div>
+  <div class="sidebar-footer shrink-0 border-t border-slate-700/50 py-2 px-2 flex flex-col gap-1">
+    <button id="sidebar-new-btn" class="sidebar-icon-btn w-full py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-all flex items-center gap-2.5 px-2.5" title="新对话">
+      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 5v14m-7-7h14"/></svg>
+      <span class="sidebar-label text-sm">新对话</span>
+    </button>
+    <button id="settings-btn" class="sidebar-icon-btn w-full py-2 rounded-lg text-slate-400 hover:bg-slate-800 hover:text-white transition-all flex items-center gap-2.5 px-2.5" title="设置">
+      <svg class="w-5 h-5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+      <span class="sidebar-label text-sm">设置</span>
+    </button>
+  </div>
 </aside>
-<main id="main" class="flex-1 flex flex-col bg-gray-50 min-w-0">
-<div id="brand" class="flex-1 flex flex-col items-center justify-center pb-24">
-<div class="text-3xl font-bold text-slate-800 mb-3">张雪峰老师</div>
-<p id="brand-text" class="text-gray-400 text-sm">使用智能问答开始对话</p></div>
-<div class="flex justify-center gap-2 px-4 py-3">
-<button class="mode-btn active px-4 py-1.5 text-sm rounded-full font-medium transition-all bg-blue-600 text-white shadow-md shadow-blue-600/20" data-mode="agent">智能问答</button>
-<button class="mode-btn px-4 py-1.5 text-sm rounded-full font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-200/80 transition-all" data-mode="volunteer">志愿评估</button>
-<button class="mode-btn px-4 py-1.5 text-sm rounded-full font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-200/80 transition-all" data-mode="quote">语录搜索</button></div>
-<div id="chat-messages" class="flex-1 overflow-y-auto px-4 py-3 space-y-4"></div>
-<div id="tool-panel" class="flex-1 overflow-y-auto px-4 py-6" style="display:none"></div>
-<div id="input-bar" class="px-4 py-3 bg-white border-t border-gray-100">
-<div class="max-w-3xl mx-auto flex items-center gap-3">
-<input id="msg-input" type="text" placeholder="输入你的问题..." class="flex-1 px-5 py-3 bg-gray-100 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
-<button id="send-btn" class="shrink-0 w-10 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-full flex items-center justify-center transition-colors shadow-md shadow-blue-600/20 active:scale-95">
-<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
-</button></div></div></main></div>
+
+<!-- ====== Main Content ====== -->
+<main id="main" class="flex-1 flex flex-col bg-gray-50 min-w-0 min-h-0">
+
+  <!-- Chat area: mode header + centered brand + messages + tool panel -->
+  <div id="chat-area" class="flex-1 flex flex-col min-h-0">
+
+    <!-- Mode indicator: normal-flow header (not floating) -->
+    <div id="mode-indicator" class="shrink-0 px-4 py-2 border-b border-gray-100 bg-white">
+      <span id="mode-label" class="text-sm font-semibold text-gray-500">智能问答</span>
+    </div>
+
+    <!-- Brand area: centered vertically when no messages -->
+    <div id="brand-area" class="flex-1 flex flex-col items-center justify-center min-h-0">
+      <div id="brand" class="text-center pb-6">
+        <div class="text-3xl font-bold text-slate-800 mb-3">高考志愿助手</div>
+        <p id="brand-text" class="text-gray-400 text-sm">使用智能问答开始对话</p>
+      </div>
+      <div id="mode-buttons" class="flex justify-center gap-2 px-4 pb-6">
+        <button class="mode-btn active px-4 py-1.5 text-sm rounded-full font-medium transition-all bg-blue-600 text-white shadow-md shadow-blue-600/20" data-mode="agent">智能问答</button>
+        <button class="mode-btn px-4 py-1.5 text-sm rounded-full font-medium text-gray-500 hover:text-gray-700 hover:bg-gray-200/80 transition-all" data-mode="volunteer">志愿评估</button>
+      </div>
+    </div>
+
+    <!-- Chat messages (shown when chatting, takes remaining space) -->
+    <div id="chat-messages" style="display:none" class="w-full max-w-3xl mx-auto flex-1 overflow-y-auto px-4 py-3 space-y-4"></div>
+
+    <!-- Tool panel (for volunteer/quote modes) -->
+    <div id="tool-panel" style="display:none" class="w-full max-w-xl mx-auto flex-1 overflow-y-auto px-4 py-6"></div>
+  </div>
+
+  <!-- Input bar (sticky bottom) -->
+  <div id="input-bar" class="shrink-0 px-4 py-3 bg-white border-t border-gray-100">
+    <div class="max-w-3xl mx-auto flex items-center gap-3">
+      <input id="msg-input" type="text" placeholder="输入你的问题..." class="flex-1 px-5 py-3 bg-gray-100 rounded-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all">
+      <button id="send-btn" class="shrink-0 w-10 h-10 bg-blue-600 hover:bg-blue-700 text-white rounded-full flex items-center justify-center transition-colors shadow-md shadow-blue-600/20 active:scale-95">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/></svg>
+      </button>
+    </div>
+  </div>
+</main>
+</div>
+
+<!-- ====== Settings Modal ====== -->
+<div id="settings-overlay" class="settings-overlay hidden">
+<div id="settings-modal" class="settings-modal">
+<div class="settings-header">
+<h3>系统设置</h3>
+<button id="settings-close" class="settings-close-btn">&times;</button>
+</div>
+<form id="settings-form" class="settings-body">
+<div class="settings-section">
+<h4>主模型</h4>
+<div class="form-group">
+<label>API Key</label>
+<input id="cfg-primary-key" type="text" placeholder="sk-ant-..." autocomplete="off" class="pill-input">
+</div>
+<div class="form-group">
+<label>模型名称</label>
+<input id="cfg-primary-model" type="text" placeholder="deepseek-v4-pro" class="pill-input" value="deepseek-v4-pro">
+</div>
+</div>
+<div class="settings-section">
+<h4>备用模型</h4>
+<div class="form-group">
+<label>API Key</label>
+<input id="cfg-fallback-key" type="text" placeholder="sk-..." autocomplete="off" class="pill-input">
+</div>
+<div class="form-group">
+<label>模型名称</label>
+<input id="cfg-fallback-model" type="text" placeholder="deepseek-chat" class="pill-input" value="deepseek-chat">
+</div>
+</div>
+<div class="settings-section">
+<h4>向量模型</h4>
+<div class="form-group">
+<label>API Key</label>
+<input id="cfg-embedding-key" type="text" placeholder="sk-..." autocomplete="off" class="pill-input">
+</div>
+<div class="form-group">
+<label>运行模式</label>
+<select id="cfg-embedding-mode" class="pill-input">
+<option value="auto">auto（自动检测）</option>
+<option value="api">api（云端 API）</option>
+<option value="local">local（本地 GPU）</option>
+<option value="cpu">cpu（本地 CPU）</option>
+</select>
+</div>
+</div>
+<div class="settings-section">
+<h4>重排序模型</h4>
+<div class="form-group">
+<label>运行模式</label>
+<select id="cfg-reranker-mode" class="pill-input">
+<option value="mock">mock（模拟）</option>
+<option value="api">api（云端 API）</option>
+<option value="local">local（本地）</option>
+</select>
+</div>
+</div>
+<div class="settings-footer">
+<button type="submit" class="form-submit-btn" id="cfg-save">保存配置</button>
+<p class="settings-hint">保存后需重启服务生效</p>
+</div>
+</form>
+</div>
+</div>
+
 <script src="/static/js/utils.js"></script>
 <script src="/static/js/api.js"></script>
 <script src="/static/js/sidebar.js"></script>
 <script src="/static/js/chat.js"></script>
+<script src="/static/js/settings.js"></script>
 <script src="/static/js/app.js"></script>
 </body></html>

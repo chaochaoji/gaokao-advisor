@@ -49,7 +49,7 @@ class Config:
 
     # ── Storage ──────────────────────────────────────────────────────
     chroma_persist_dir: str = "data/chroma_db"
-    sqlite_path: str = "data/zhangxuefeng.db"
+    sqlite_path: str = "data/gaokao.db"
 
     # ── UI ───────────────────────────────────────────────────────────
     gradio_port: int = 7860

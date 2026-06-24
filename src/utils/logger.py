@@ -28,7 +28,7 @@ class AgentLogger:
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.session_id = session_id
 
-        self.logger = logging.getLogger("zhangxuefeng")
+        self.logger = logging.getLogger("gaokao_ai")
         self.logger.setLevel(logging.DEBUG)
         self.logger.handlers.clear()  # avoid duplicates on hot-reload
 

@@ -4,7 +4,7 @@ import re
 class InputSafetyGateway:
     HARD_BLOCK = [
         (r"(忽略|忘记|覆盖).*(指令|prompt|规则|人格)", "jailbreak"),
-        (r"(隐私|手机号|家庭地址|身份证).*(张雪峰)|(张雪峰).*(隐私|手机号|家庭地址|身份证)", "privacy"),
+        (r"(隐私|手机号|家庭地址|身份证).*(老师|专家)|(老师|专家).*(隐私|手机号|家庭地址|身份证)", "privacy"),
     ]
 
     SOFT_FLAG = [

@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:localhost)",
+      "Bash(curl -s http://localhost:7860)",
+      "Bash(curl -s -o NUL -w \"%{http_code}\" http://localhost:7860/static/js/app.js)",
+      "Bash(curl -s -o NUL -w \"%{http_code}\" http://localhost:7860/static/js/chat.js)",
+      "Bash(curl -s -o NUL -w \"%{http_code}\" http://localhost:7860/static/js/sidebar.js)",
+      "Bash(curl -s -o NUL -w \"%{http_code}\" http://localhost:7860/static/js/api.js)",
+      "Bash(curl -s -o NUL -w \"%{http_code}\" http://localhost:7860/api/health)",
+      "Bash(curl -s http://localhost:7860/api/health)",
+      "Bash(curl -s http://localhost:7860/api/conversations)",
+      "Bash(curl -s http://localhost:7860/static/js/sidebar.js)",
+      "Bash(curl -s http://localhost:7860/static/js/chat.js)",
+      "Bash(curl -s -I http://localhost:7860/static/js/sidebar.js)",
+      "Bash(curl -s -I http://localhost:7860/static/js/api.js)",
+      "Bash(curl -s \"http://localhost:7860/api/chat/stream?msg=你好&session=new&mode=agent\")"
+    ]
+  }
+}

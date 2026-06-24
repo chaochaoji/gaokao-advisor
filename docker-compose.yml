@@ -1,5 +1,5 @@
 services:
-  zhangxuefeng:
+  gaokao-ai:
     build: .
     ports:
       - "${GRADIO_PORT:-7860}:7860"

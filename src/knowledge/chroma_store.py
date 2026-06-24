@@ -310,7 +310,7 @@ def get_chroma_collection(config, embedding_svc=None) -> NumpyCollection:
         return col
 
     return NumpyCollection(
-        name="zhangxuefeng_corpus",
+        name="gaokao_corpus",
         persist_dir=persist_dir,
         embedding_svc=embedding_svc,
     )

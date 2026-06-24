@@ -63,17 +63,11 @@ reranker = RerankerService(
 )
 logger.log_info('reranker', 'service_initialized', {'mode': config.reranker_mode})
 
-from src.retrieval.bm25_search import BM25Index
-_bm25_t0 = time.time()
-bm25_index = BM25Index(chroma_col._documents)
-logger.log_info('bm25', 'index_built', {'docs': bm25_index.doc_count, 'vocab': bm25_index.vocab_size, 'build_ms': int((time.time()-_bm25_t0)*1000)})
-
 hybrid_search = HybridSearch(
     mode='prod',
     embedding_svc=embedding_svc,
     chroma_col=chroma_col,
     db_conn=db,
-    bm25_index=bm25_index,
     reranker=reranker,
     logger=logger,
 )

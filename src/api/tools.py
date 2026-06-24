@@ -240,6 +240,17 @@ def volunteer_tool(data: VolunteerInput):
     if data.desired_location: user_msg += f" 期望{data.desired_location}"
 
     if result["ok"]:
+        # Override LLM's estimated rank with exact value from 一分一段表
+        if exact_rank and exact_rank > 100:
+            result["data"]["summary"]["rank"] = exact_rank
+            result["data"]["summary"]["rank_range"] = [
+                max(0, exact_rank - 500), exact_rank + 500
+            ]
+            result["data"]["summary"]["position"] = (
+                f"根据2025年{data.province}{data.category}一分一段表，"
+                f"{data.score}分 → 累计位次 {exact_rank} 名"
+            )
+
         # 结构化存储
         session_store.add_turn(sid, user_msg, {
             "content_type": "volunteer_assessment",

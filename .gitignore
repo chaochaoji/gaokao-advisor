@@ -8,14 +8,17 @@ __pycache__/
 dist/
 .pytest_cache/
 
-# Data directories
+# Data directories（不上传提取文本和数据库）
 data/raw/*
 data/processed/*
 data/chroma_db/*
+data/extracted/*
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/chroma_db/.gitkeep
+!data/extracted/.gitkeep
 data/*.db
+data/*.db-*
 
 # Models (large files)
 models/*
