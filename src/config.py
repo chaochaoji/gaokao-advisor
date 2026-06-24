@@ -55,14 +55,9 @@ class Config:
     gradio_port: int = 7860
     gradio_share: bool = False
 
-    # ── Limits ───────────────────────────────────────────────────────
-    max_concurrent_requests: int = 10
-    rate_limit_per_user: int = 2
-
     # ── Logging ──────────────────────────────────────────────────────
     log_dir: str = "logs"
     log_level: str = "INFO"
-    log_retention_days: int = 30
 
 
 def load_config(load_env_file: bool = True) -> Config:

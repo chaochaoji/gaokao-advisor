@@ -20,4 +20,4 @@ EXPOSE 7860
 HEALTHCHECK --interval=30s --timeout=3s \
     CMD python -c "import json; json.load(open('logs/health.json'))" || exit 1
 
-CMD ["python", "app.py"]
+CMD ["python", "app_api.py"]

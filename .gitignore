@@ -38,3 +38,9 @@ Thumbs.db
 
 # Test outputs
 tests/eval_report.json
+
+# Temp / dev artifacts
+_tessdata_temp/
+_torch_wheels/
+*.bak
+.superpowers/
