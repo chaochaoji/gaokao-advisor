@@ -19,7 +19,7 @@ def _load_dotenv_if_available() -> None:
 
 @dataclass
 class Config:
-    """Central configuration for the Zhang Xuefeng Knowledge Agent.
+    """Central configuration for GaokaoGuide.
 
     All fields have sensible defaults.  Every field can be overridden
     at runtime via a ZXF_<FIELD_NAME_UPPER> environment variable (see

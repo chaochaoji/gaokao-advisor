@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""FastAPI application for the Zhang Xuefeng Knowledge Agent (Qianwen-style UI)."""
+"""GaokaoGuide — AI-powered college admission advisor."""
 from __future__ import annotations
 import os, sys
 from contextlib import asynccontextmanager
@@ -21,7 +21,7 @@ async def lifespan(app: FastAPI):
     yield
     logger.log_info("api", "server_stopped")
 
-app = FastAPI(title="Zhang Xuefeng Knowledge Agent", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="GaokaoGuide", version="2.0.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 
 @app.get("/api/health")

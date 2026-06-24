@@ -1,5 +1,5 @@
 services:
-  gaokao-ai:
+  gaokao-guide:
     build: .
     ports:
       - "${GRADIO_PORT:-7860}:7860"

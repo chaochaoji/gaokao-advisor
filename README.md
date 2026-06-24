@@ -12,8 +12,8 @@
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/你的用户名/zhangxuefengagent.git
-cd zhangxuefengagent
+git clone https://github.com/你的用户名/gaokao-guide.git
+cd gaokao-guide
 
 # 2. 安装依赖
 pip install -r requirements.txt
@@ -109,7 +109,7 @@ python scripts/_reindex_2025.py
 ## 项目结构
 
 ```
-zhangxuefengagent/
+gaokao-guide/
 ├── app_api.py              # FastAPI 入口
 ├── Dockerfile              # Docker 构建（可选）
 ├── docker-compose.yml      # Docker Compose（可选）
