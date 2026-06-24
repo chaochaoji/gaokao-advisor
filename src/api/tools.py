@@ -161,6 +161,15 @@ def _extract_rank_from_results(results: list, user_score: int, province: str) ->
     return ''
 
 
+def _parse_rank_from_hint(rank_hint: str) -> int:
+    """Extract the numeric rank value from a rank_hint string."""
+    import re
+    m = re.search(r'位次是\s*([\d,]+)\s*名', rank_hint)
+    if m:
+        return int(m.group(1).replace(',', ''))
+    return 0
+
+
 class VolunteerInput(BaseModel):
     province: str = "北京"; score: int = 600; rank: int = 0
     category: str = "物理类"; interests: str = ""
@@ -198,8 +207,13 @@ def volunteer_tool(data: VolunteerInput):
     else:
         user_info_lines.append("期望地区: 未指定（全国范围推荐）")
 
-    # Extract 一分一段表 precision rank data and put it front-and-center
+    # Extract 一分一段表 precision rank data
     rank_hint = _extract_rank_from_results(results, data.score, data.province)
+    if rank_hint:
+        # Force the exact rank into user_info so it's impossible to miss
+        rank_val = _parse_rank_from_hint(rank_hint)
+        if rank_val:
+            user_info_lines.insert(0, f"【精确位次】{data.score}分 → {rank_val}名（已从一分一段表查证，直接引用，禁止估算）")
 
     full_prompt = (
         f"{prompt}{nl}{nl}"
