@@ -175,24 +175,69 @@ zhangxuefengagent/
     └── processed/          #   处理后文件
 ```
 
-## 架构
+## 回答策略
+
+用户提交问题后，系统经过完整流水线处理：
 
 ```
-用户输入 → 安全检测 → 意图路由 → 混合搜索 → LLM 生成 → 结构化渲染
-                                    │
-                            ┌───────┼────────┐
-                            ▼       ▼        ▼
-                         向量检索  FTS5检索  省份注入
-                            │       │        │
-                            └───┬───┘────────┘
-                                ▼
-                          RRF 融合 → 重排序 → 返回
+用户输入
+  │
+  ├── ① 安全检测 ─────────────→ 不通过 → 返回安全提醒，拒绝回答
+  │                             通过 ↓
+  ├── ② 意图路由 ─────────────→ volunteer / opinion / style_chat / general
+  │     基于关键词预检 + LLM 二次确认，不同意图走不同 prompt 模板
+  │
+  ├── ③ 多路混合搜索 ─────────→ RRF 融合
+  │     ├─ 向量检索（charbigram hash，语义兜底）
+  │     ├─ FTS5 全文检索（SQLite 关键词匹配）
+  │     └─ 省份注入（扫描 ChromaDB 中 score_data 文档，匹配用户省份）
+  │          │
+  │     ┌────┴────┐
+  │     │ RRF 融合 │ ← 三路结果加权合并，score_data 文档置顶
+  │     └────┬────┘
+  │
+  ├── ④ 位次精确提取 ─────────→ 从搜索结果中匹配一分一段表
+  │     ├─ 找到精确位次 → 写入 prompt：用户N分 → 位次XXX名（禁止估算）
+  │     └─ 未找到 → 标记「缺少精确一分一段表」
+  │
+  ├── ⑤ LLM 生成 ─────────────→ 主模型 → 失败时自动切换备用模型
+  │     ├─ 智能问答：流式 SSE 返回，300-800 字/轮
+  │     └─ 志愿评估：生成结构化 JSON（院校列表 + 位次 + 分析 + 风险）
+  │
+  ├── ⑥ 后端位次覆写 ─────────→ 无论 LLM 输出什么 rank 值，
+  │                              后端用步骤④提取的精确值强制覆盖
+  │
+  ├── ⑦ 会话持久化 ───────────→ SQLite 存储
+  │     ├─ 普通对话：role + content
+  │     └─ 志愿评估：content_type=volunteer_assessment + structured_data
+  │
+  └── ⑧ 前端渲染 ─────────────→ 按 content_type 分发
+        ├─ 普通文本 → Markdown 渲染
+        └─ volunteer_assessment → 结构化卡片（位次定位 + 冲稳保 + 概率条 + 专业分析 + 风险提示）
 ```
 
-- **混合检索**：向量（语义）+ FTS5（全文）+ 省份关键词注入（精确命中一分一段表）
-- **位次覆写**：后端从检索结果中提取一分一段表精确位次，直接覆写 LLM 返回的 `summary.rank`，避免 LLM 估算偏差
-- **LLM 路由**：意图分类 → volunteer / opinion / style_chat / general，不同场景不同 prompt
-- **会话持久化**：SQLite 存储，支持 `content_type` 区分普通对话和结构化评估结果
+### 各环节说明
+
+| 环节 | 核心文件 | 说明 |
+|------|----------|------|
+| 安全检测 | `src/safety/input_gateway.py` | 拦截越狱/隐私/辱骂/地域攻击四类输入 |
+| 意图路由 | `src/agent/router.py` | 高分+省份关键词直接判定 volunteer；其余走 LLM 分类 |
+| 混合搜索 | `src/retrieval/hybrid_search.py` | 向量 + FTS5 + 省份注入，RRF 融合后取 Top 10 |
+| 位次提取 | `src/api/tools.py` 中的 `_extract_rank_from_results` | 正则匹配 `\| N分 \| 位次 \|` 格式的表数据 |
+| LLM 生成 | `src/api/chat.py` 中的 `_call_llm` | 主模型优先，异常时自动切备用；prompt 模板在 `src/utils/prompt_templates.py` |
+| 位次覆写 | `src/api/tools.py` 第 244-252 行 | `result["summary"]["rank"] = exact_rank`，绕过 LLM 估算偏差 |
+| 会话持久化 | `src/knowledge/session_store.py` | `add_turn` 支持 dict 类型 `assistant_msg`，区分普通对话和结构化结果 |
+
+### 志愿评估 vs 智能问答
+
+| | 智能问答 | 志愿评估 |
+|---|---|---|
+| 触发方式 | 输入框自由提问 | 表单提交省份/分数/科类 |
+| prompt 模板 | `volunteer`（对话式，300-800字） | `volunteer_form`（报告式，完整 JSON） |
+| LLM 输出 | 流式文本 | 机构化 JSON（summary + schools + risks） |
+| 位次定位 | 从上下文估算 | **精确查表 + 后端覆写** |
+| 前端渲染 | Markdown | 卡片（冲/稳/保 + 概率条 + tier 筛选） |
+| 会话历史 | 文本回放 | **卡片原样恢复** |
 
 ## 使用注意事项
 
