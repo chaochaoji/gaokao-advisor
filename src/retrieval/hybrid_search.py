@@ -105,16 +105,22 @@ class HybridSearch:
         # relevant 2025 batch-line / 分数位次 / 一分一段 data.
         fused = _inject_score_data(fused, self.chroma_col, query, context)
 
-        # Branch 4: Web search fallback (DuckDuckGo, free, no key required).
-        # Used when local RAG returns few or low-quality results.  Results
-        # carry metadata.content_type="web_result" for front-end labelling.
-        try:
-            from src.retrieval.web_search import web_search
-            web_results = web_search(query, max_results=3)
-            if web_results:
-                fused = fused + web_results  # append, don't RRF-fuse
-        except Exception:
-            pass
+        # Branch 4: Web search fallback.  Triggered only when local RAG is
+        # insufficient — saves unnecessary DuckDuckGo calls on every query.
+        # Conditions:
+        #   - Volunteer scene with no score_data in top 5 (missing 一分一段)
+        #   - Total fused results < 3 (local RAG returned almost nothing)
+        if _should_web_search(fused, scene):
+            try:
+                from src.retrieval.web_search import web_search
+                web_results = web_search(query, max_results=3)
+                if web_results:
+                    fused = fused + web_results  # append, don't RRF-fuse
+                    if self.logger:
+                        self.logger.log_info("web_search", "results_appended",
+                            {"count": len(web_results), "query": query[:60]})
+            except Exception:
+                pass
 
         # Optional re-ranking
         if self.reranker and fused:
@@ -125,6 +131,30 @@ class HybridSearch:
                     self.logger.log_warning("reranker", "rerank_failed", "use_original", {"error": str(e)})
 
         return fused[:10]
+
+
+# -- Web search gating ------------------------------------------------------
+
+
+def _should_web_search(fused: list, scene: str) -> bool:
+    """Return True if local RAG results are insufficient for this query.
+
+    Triggers web search when:
+    - Volunteer scene with zero score_data in top 5 (missing 一分一段表)
+    - Fewer than 3 total results (local RAG returned almost nothing)
+    """
+    if len(fused) < 3:
+        return True
+
+    if scene == "volunteer":
+        top5_cts = [
+            (r.get("metadata", {}) or {}).get("content_type", "")
+            for r in fused[:5]
+        ]
+        if "score_data" not in top5_cts:
+            return True
+
+    return False
 
 
 # -- Score-data injection helpers -----------------------------------------
