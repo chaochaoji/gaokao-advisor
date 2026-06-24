@@ -38,8 +38,6 @@ function loadSettings() {
         setVal("#cfg-primary-model", cfg.llm_primary_model || "deepseek-v4-pro");
         setVal("#cfg-fallback-key", cfg.llm_fallback_api_key || "");
         setVal("#cfg-fallback-model", cfg.llm_fallback_model || "deepseek-v4-pro");
-        setVal("#cfg-embedding-key", cfg.embedding_api_key || "");
-        setVal("#cfg-embedding-mode", cfg.embedding_mode || "auto");
     }).catch(function (e) {
         showToast("加载配置失败: " + (e.message || "请检查服务是否运行"));
     });
@@ -51,8 +49,6 @@ function saveCurrentSettings() {
         llm_primary_model: getVal("#cfg-primary-model") || "deepseek-v4-pro",
         llm_fallback_api_key: getVal("#cfg-fallback-key"),
         llm_fallback_model: getVal("#cfg-fallback-model") || "deepseek-v4-pro",
-        embedding_api_key: getVal("#cfg-embedding-key"),
-        embedding_mode: getVal("#cfg-embedding-mode") || "auto",
         gradio_port: 7860
     };
 

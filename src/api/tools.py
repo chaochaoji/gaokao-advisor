@@ -308,7 +308,6 @@ class ConfigInput(BaseModel):
     llm_primary_api_type: str = "auto"; llm_primary_base_url: str = ""
     llm_fallback_api_key: str = ""; llm_fallback_model: str = "deepseek-v4-pro"
     llm_fallback_api_type: str = "auto"; llm_fallback_base_url: str = ""
-    embedding_api_key: str = ""; embedding_mode: str = "api"
     gradio_port: int = 7860
 
 @router.put("/config")
@@ -322,8 +321,6 @@ def save_config(data: ConfigInput):
              f"ZXF_LLM_FALLBACK_MODEL={data.llm_fallback_model}",
              f"ZXF_LLM_FALLBACK_API_TYPE={data.llm_fallback_api_type}",
              f"ZXF_LLM_FALLBACK_BASE_URL={data.llm_fallback_base_url}",
-             f"ZXF_EMBEDDING_API_KEY={data.embedding_api_key}",
-             f"ZXF_EMBEDDING_MODE={data.embedding_mode}",
              f"ZXF_GRADIO_PORT={data.gradio_port}", ""]
     with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
         f.write(chr(10).join(lines))
@@ -338,8 +335,6 @@ def save_config(data: ConfigInput):
     os.environ["ZXF_LLM_FALLBACK_MODEL"] = data.llm_fallback_model
     os.environ["ZXF_LLM_FALLBACK_API_TYPE"] = data.llm_fallback_api_type
     os.environ["ZXF_LLM_FALLBACK_BASE_URL"] = data.llm_fallback_base_url
-    os.environ["ZXF_EMBEDDING_API_KEY"] = data.embedding_api_key
-    os.environ["ZXF_EMBEDDING_MODE"] = data.embedding_mode
     os.environ["ZXF_GRADIO_PORT"] = str(data.gradio_port)
 
     from src.config import load_config
