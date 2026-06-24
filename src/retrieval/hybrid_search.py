@@ -163,6 +163,7 @@ def _inject_score_data(results, chroma_col, query, context,
             'id': doc_id,
             'content': doc,
             'metadata': meta,
+            'score': 0.99,  # high score so reranker keeps them at top
             '_pri': priority,
         })
         seen.add(doc_id)
