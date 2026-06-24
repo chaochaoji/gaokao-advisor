@@ -40,7 +40,6 @@ function loadSettings() {
         setVal("#cfg-fallback-model", cfg.llm_fallback_model || "deepseek-v4-pro");
         setVal("#cfg-embedding-key", cfg.embedding_api_key || "");
         setVal("#cfg-embedding-mode", cfg.embedding_mode || "auto");
-        setVal("#cfg-reranker-mode", cfg.reranker_mode || "mock");
     }).catch(function (e) {
         showToast("加载配置失败: " + (e.message || "请检查服务是否运行"));
     });
@@ -54,7 +53,6 @@ function saveCurrentSettings() {
         llm_fallback_model: getVal("#cfg-fallback-model") || "deepseek-v4-pro",
         embedding_api_key: getVal("#cfg-embedding-key"),
         embedding_mode: getVal("#cfg-embedding-mode") || "auto",
-        reranker_mode: getVal("#cfg-reranker-mode") || "mock",
         gradio_port: 7860
     };
 

@@ -433,7 +433,7 @@ def load_settings():
 def save_settings(llm_primary_key, llm_primary_model,
                   llm_fallback_key, llm_fallback_model,
                   embedding_key, embedding_mode,
-                  reranker_mode, gradio_port):
+                  gradio_port):
     lines = [
         '# Zhang Xuefeng Agent - Environment Configuration',
         '# Generated from Settings panel',
@@ -444,7 +444,6 @@ def save_settings(llm_primary_key, llm_primary_model,
         f'ZXF_LLM_FALLBACK_MODEL={llm_fallback_model}',
         f'ZXF_EMBEDDING_API_KEY={embedding_key}',
         f'ZXF_EMBEDDING_MODE={embedding_mode}',
-        f'ZXF_RERANKER_MODE={reranker_mode}',
         f'GRADIO_PORT={gradio_port}',
         '',
     ]
@@ -460,7 +459,6 @@ def get_current_settings():
         s.get('ZXF_LLM_FALLBACK_MODEL', config.llm_fallback_model),
         s.get('ZXF_EMBEDDING_API_KEY', ''),
         s.get('ZXF_EMBEDDING_MODE', config.embedding_mode),
-        s.get('ZXF_RERANKER_MODE', config.reranker_mode),
         s.get('GRADIO_PORT', str(config.gradio_port)),
     ]
 
@@ -524,14 +522,13 @@ def create_ui():
                     s_ek = gr.Textbox(label='Embedding API Key', placeholder='sk-...', type='password')
                     s_em = gr.Radio(choices=['auto', 'api', 'local', 'cpu'], label='Embedding 模式', value='auto')
                 with gr.Row():
-                    s_rm = gr.Radio(choices=['api', 'local', 'mock'], label='Reranker 模式', value=config.reranker_mode)
                     s_pt = gr.Number(label='服务端口', value=config.gradio_port, precision=0)
                 with gr.Row():
                     s_save = gr.Button('保存配置', variant='primary')
                     s_load = gr.Button('加载当前配置')
                 s_msg = gr.Markdown('')
-                s_load.click(fn=get_current_settings, inputs=[], outputs=[s_pk, s_pm, s_fk, s_fm, s_ek, s_em, s_rm, s_pt])
-                s_save.click(fn=save_settings, inputs=[s_pk, s_pm, s_fk, s_fm, s_ek, s_em, s_rm, s_pt], outputs=[s_msg])
+                s_load.click(fn=get_current_settings, inputs=[], outputs=[s_pk, s_pm, s_fk, s_fm, s_ek, s_em, s_pt])
+                s_save.click(fn=save_settings, inputs=[s_pk, s_pm, s_fk, s_fm, s_ek, s_em, s_pt], outputs=[s_msg])
     return demo
 
 if __name__ == '__main__':
