@@ -87,6 +87,10 @@ function renderVolunteerForm() {
 }
 
 function renderVolunteerResult(data) {
+    renderVolunteerResultToContainer(el("#tool-panel"), data);
+}
+
+function renderVolunteerResultToContainer(container, data) {
     var summary = data.summary || {};
     var schools = data.schools || [];
     var majorAnalysis = data.major_analysis || {};
@@ -167,15 +171,15 @@ function renderVolunteerResult(data) {
 
     html += '</div>'; // .assessment-result
 
-    el("#tool-panel").innerHTML = html;
+    container.innerHTML = html;
 
-    // 绑定 tier 筛选
-    els("#tool-panel .tier-tab").forEach(function(tab) {
+    // 绑定 tier 筛选（作用域在 container 内）
+    container.querySelectorAll(".tier-tab").forEach(function(tab) {
         tab.addEventListener("click", function() {
-            els("#tool-panel .tier-tab").forEach(function(t) { t.classList.remove("active"); });
+            container.querySelectorAll(".tier-tab").forEach(function(t) { t.classList.remove("active"); });
             tab.classList.add("active");
             var filter = tab.dataset.filter;
-            els("#school-list .school-card").forEach(function(card) {
+            container.querySelectorAll(".school-card").forEach(function(card) {
                 if (filter === 'all' || card.dataset.tier === filter) {
                     card.style.display = '';
                 } else {
