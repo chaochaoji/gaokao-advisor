@@ -6,7 +6,7 @@ the corpus_fts virtual table.
 
 import sqlite3
 import os
-from config import Config
+from src.config import Config
 
 
 def get_db(config: Config) -> sqlite3.Connection:

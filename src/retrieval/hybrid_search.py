@@ -127,6 +127,12 @@ class HybridSearch:
             except Exception:
                 pass
 
+        # Inject province-matched score_data chunks when query asks for rank/score data.
+        # Vector similarity alone is too weak to surface structured tables; explicit
+        # province-keyword injection ensures the LLM sees relevant 2025 data.
+        if fused and _is_score_query(query):
+            fused = _inject_province_score_data(fused, self.chroma_col, query, context)
+
         if self.reranker and fused:
             try:
                 fused = self.reranker.rerank(query, fused)
@@ -148,6 +154,14 @@ _SCORE_QUERY_PATTERNS = [
     '特招线', '本科线', '专科线', '一分一段表', '排名', '多少分',
     '几分', '估分', '分数', '省控线', '调档线', '分能上', '分左右',
     '分可以', '分够', '分报',
+]
+
+# Province name list for keyword injection
+_PROVINCE_NAMES = [
+    '北京', '天津', '上海', '重庆', '广东', '江苏', '浙江', '山东',
+    '河南', '河北', '湖北', '湖南', '福建', '安徽', '江西', '辽宁',
+    '四川', '陕西', '山西', '云南', '贵州', '广西', '甘肃', '吉林',
+    '黑龙江', '内蒙古', '新疆', '海南', '宁夏', '青海', '西藏',
 ]
 
 
@@ -173,3 +187,89 @@ def _boost_score_data(results: list[dict], boost: float = 0.15) -> list[dict]:
             other_items.append(item)
     # score_data first, then others — both preserving original order
     return score_data_items + other_items
+
+
+def _find_province(query: str, context: dict) -> str:
+    """Extract province name from query or context."""
+    # Check context first
+    province = context.get('province', '')
+    if province and province in _PROVINCE_NAMES:
+        return province
+    # Check query
+    for p in _PROVINCE_NAMES:
+        if p in query:
+            return p
+    return ''
+
+
+def _inject_province_score_data(
+    results: list[dict],
+    chroma_col,
+    query: str,
+    context: dict,
+    max_inject: int = 5,
+) -> list[dict]:
+    """Inject province-matched score_data chunks at the front of results.
+
+    Vector search alone can't reliably surface structured score tables
+    (character-bigram hashing doesn't capture "598分" vs "分数位次院校"
+    semantic similarity).  This function directly finds score_data docs
+    for the target province and prepends them.
+    """
+    province = _find_province(query, context)
+    if not province:
+        return results
+
+    # Scan ChromaDB for province-matched score_data docs
+    injected = []
+    seen_ids = {r.get('id', '') for r in results}
+    # Limit scan to first 60k docs for performance
+    for i in range(min(len(chroma_col._documents), 60000)):
+        meta = chroma_col._metadatas[i] if i < len(chroma_col._metadatas) else {}
+        if not isinstance(meta, dict):
+            continue
+        if meta.get('content_type') != 'score_data':
+            continue
+        doc_text = chroma_col._documents[i] if i < len(chroma_col._documents) else ''
+        if province not in doc_text:
+            continue
+        doc_id = chroma_col._ids[i] if i < len(chroma_col._ids) else ''
+        if doc_id in seen_ids:
+            continue
+        injected.append({
+            'id': doc_id,
+            'content': doc_text,
+            'metadata': meta,
+        })
+        seen_ids.add(doc_id)
+        if len(injected) >= max_inject:
+            break
+
+    if not injected:
+        return results
+
+    # Sort: 一分一段表 docs first, then province-header docs, then others
+    def _sort_key(r):
+        content = r.get('content', '') or ''
+        # Priority 0: explicit 一分一段表 or 分数位次对照
+        if '一分一段' in content[:300] or '分数位次对照' in content[:300]:
+            return 0
+        # Priority 1: province in header
+        if province in content[:200]:
+            return 1
+        return 2
+    injected.sort(key=_sort_key)
+
+    # Prepend injected score_data, then deduplicated original results
+    return injected + results
+
+
+def _inject_batch_line_data(
+    results: list[dict],
+    chroma_col,
+    query: str,
+    context: dict,
+) -> list[dict]:
+    """Inject general batch-line data when province not found."""
+    # Already covered by _inject_province_score_data for most cases
+    return results
