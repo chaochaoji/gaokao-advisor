@@ -247,8 +247,8 @@ def _find_score_data_for_context(
             'metadata': meta,
             '_priority': priority,
         })
-        if len(results) >= max_results * 2:
-            break
+    # Collect ALL province score_data docs, not just the first N.
+    # Then sort by priority (一分一段表 first) and return top max_results.
 
     results.sort(key=lambda r: r.get('_priority', 1))
     for r in results:
