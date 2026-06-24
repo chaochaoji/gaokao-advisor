@@ -62,7 +62,8 @@ ZXF_EMBEDDING_MODE=api
 # 服务端口
 GRADIO_PORT=7860
 
-# 联网搜索无需配置，DuckDuckGo 免费、无需 API Key
+# 联网搜索无需配置，DuckDuckGo 免费、无需 API Key。
+# 优先搜索以下官方数据源，确保结果权威性。
 ```
 
 ## 知识库
@@ -208,7 +209,7 @@ LLM 的推理核心是**志愿填报五步法**，贯穿在所有回答中：
   │     ├─ 向量检索（charbigram hash，语义兜底）
   │     ├─ FTS5 全文检索（SQLite 关键词匹配）
   │     ├─ 省份注入（扫描 ChromaDB 中 score_data 文档，匹配用户省份）
-  │     └─ 联网搜索（仅当本地无 score_data 或结果不足时触发，避免浪费调用）
+  │     └─ 联网搜索（优先14个官方数据源，本地不足时按需触发）
   │          │
   │     ┌────┴────┐
   │     │ RRF 融合 │ ← 三路结果加权合并，联网结果追加在末尾
@@ -241,7 +242,21 @@ LLM 的推理核心是**志愿填报五步法**，贯穿在所有回答中：
 | 安全检测 | `src/safety/input_gateway.py` | 拦截越狱/隐私/辱骂/地域攻击四类输入 |
 | 意图路由 | `src/agent/router.py` | 高分+省份关键词直接判定 volunteer；其余走 LLM 分类 |
 | 混合搜索 | `src/retrieval/hybrid_search.py` | 向量 + FTS5 + 省份注入 + 联网，RRF 融合后取 Top 10 |
-| 联网搜索 | `src/retrieval/web_search.py` | DuckDuckGo 免费 API，本地结果不足时追加 3 条联网结果 |
+| 联网搜索 | `src/retrieval/web_search.py` | DuckDuckGo 免费，优先搜 14 个官方数据源，本地不足时按需触发 |
+
+**联网搜索优先数据源：**
+
+| 类别 | 来源 | 域名 |
+|------|------|------|
+| 查分与政策 | 阳光高考网 | gaokao.chsi.com.cn |
+| | 各省教育考试院 | bjeea.cn, sxkszx.cn 等 6 省 |
+| 选校与专业 | 软科排名 | shanghairanking.cn |
+| | 教育部学科评估 | cdgdc.edu.cn |
+| | 青塔网 | cingta.com |
+| 就读体验 | 哐哐大学 | kuangkuangdaxue.com |
+| 高考综合 | 掌上高考 | eol.cn |
+| | 高考100 | gk100.com |
+| | 大学生必备网 | dxsbb.com |
 | 位次提取 | `src/api/tools.py` 中的 `_extract_rank_from_results` | 正则匹配 `\| N分 \| 位次 \|` 格式的表数据 |
 | LLM 生成 | `src/api/chat.py` 中的 `_call_llm` | 主模型优先，异常时自动切备用；prompt 模板在 `src/utils/prompt_templates.py` |
 | 位次覆写 | `src/api/tools.py` 第 244-252 行 | `result["summary"]["rank"] = exact_rank`，绕过 LLM 估算偏差 |
