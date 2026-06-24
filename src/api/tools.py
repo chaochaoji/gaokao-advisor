@@ -123,23 +123,41 @@ def _extract_rank_from_results(results: list, user_score: int, province: str) ->
         for line in content.split('\n'):
             if score_str not in line:
                 continue
-            # Extract rank: patterns like "| 598 | 10,984 |" or "598分 → 10,984名"
-            rank_match = re.search(r'[\|\s](\d{1,3}[,\d]*)\s*[\|\→]', line)
-            if not rank_match:
-                rank_match = re.search(r'(\d{1,3}[,\d]+)\s*(?:名|位)', line)
-            if rank_match:
-                rank_str = rank_match.group(1).replace(',', '')
-                try:
-                    rank_val = int(rank_str)
-                    return (
-                        "\n【必须使用以下精确数据】\n"
-                        f"在检索数据中找到了 {province} 的一分一段表。"
-                        f"用户 {user_score} 分对应的精确位次是 {rank_str} 名。"
-                        f"请在 summary.position 和 summary.rank 中直接使用这个值。"
-                        f"禁止用批次线反推。\n\n"
-                    )
-                except ValueError:
-                    pass
+            # Extract rank from pipe-separated table: "| 598 | 10,984 |"
+            # Must capture the SECOND number (rank), not the score
+            m = re.match(r'\|\s*\d{3}\s*\|\s*([\d,]+)\s*\|', line)
+            if not m:
+                # Fallback: "598分 → 10,984名"
+                m = re.search(r'(?:→|位次|累计)\s*([\d,]+)\s*(?:名|位|\|)', line)
+            if not m:
+                # Last resort: find all numbers, take the largest as rank
+                nums = re.findall(r'[\d,]+', line)
+                nums = [n.replace(',', '') for n in nums]
+                nums = [int(n) for n in nums if n.isdigit()]
+                if len(nums) >= 2:
+                    # Exclude the score itself, take max remaining as rank
+                    candidates = [n for n in nums if n != user_score]
+                    if candidates:
+                        return (
+                            "\n【必须使用以下精确数据】\n"
+                            f"在检索数据中找到了 {province} 的一分一段表。"
+                            f"用户 {user_score} 分对应的精确位次是 {max(candidates)} 名。"
+                            f"请在 summary.position 和 summary.rank 中直接使用这个值。"
+                            f"禁止用批次线反推。\n\n"
+                        )
+                continue
+            rank_str = m.group(1).replace(',', '')
+            try:
+                rank_val = int(rank_str)
+                return (
+                    "\n【必须使用以下精确数据】\n"
+                    f"在检索数据中找到了 {province} 的一分一段表。"
+                    f"用户 {user_score} 分对应的精确位次是 {rank_str} 名。"
+                    f"请在 summary.position 和 summary.rank 中直接使用这个值。"
+                    f"禁止用批次线反推。\n\n"
+                )
+            except ValueError:
+                pass
     return ''
 
 
